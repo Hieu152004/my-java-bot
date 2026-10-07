@@ -86,24 +86,13 @@ public class CasinoBot extends TelegramLongPollingBot {
         long startTime = System.currentTimeMillis();
         ScheduledFuture<?> lobbyCountdown = null;
         
-        // Trạng thái chơi bài tố
         boolean playing = false;
         int currentTurnIndex = 0;
         long highestBet = 0;
         long totalPot = 0;
         Map<Long, Long> playerBets = new ConcurrentHashMap<>();
-        Map<Long, List<Card>> cards = new ConcurrentHashMap<>();
-        Set<Long> folded = new ConcurrentHashMap.KeySetView<>();
+        Set<Long> folded = ConcurrentHashMap.newKeySet();
         ScheduledFuture<?> turnCountdown = null;
-    }
-
-    private static class Card {
-        String rank;
-        String suit;
-        Card(String rank, String suit) {
-            this.rank = rank;
-            this.suit = suit;
-        }
     }
 
     @Override
@@ -204,7 +193,6 @@ public class CasinoBot extends TelegramLongPollingBot {
         }
     }
 
-    // --- XÚC XẮC (40 GIÂY) ---
     private void createDiceGame(long chatId) {
         DiceGame game = new DiceGame();
         games.put(chatId, game);
@@ -268,7 +256,7 @@ public class CasinoBot extends TelegramLongPollingBot {
                 rollDiceAuto(chatId);
             } else {
                 games.remove(chatId);
-                sendMessage(chatId, "⚠️ <b>Hết 40 giây! Ván đấu bị hủy do không đủ điều kiện (thiếu cái hoặc thiếu cược).</b>");
+                sendMessage(chatId, "⚠️ <b>Hết 40 giây! Ván đấu bị hủy do không đủ điều kiện.</b>");
                 sendMainMenu(chatId);
             }
             return;
@@ -284,7 +272,6 @@ public class CasinoBot extends TelegramLongPollingBot {
         try { execute(edit); } catch (Exception ignored) {}
     }
 
-    // --- BÀI TỐ (30s sảnh chờ, 50s mỗi lượt, tag tên thông minh) ---
     private void showBaiCaoSelectBet(long chatId, int messageId) {
         EditMessageText edit = new EditMessageText();
         edit.setChatId(String.valueOf(chatId));
@@ -331,7 +318,6 @@ public class CasinoBot extends TelegramLongPollingBot {
             Message sent = execute(msg);
             game.messageId = sent.getMessageId();
 
-            // Đếm ngược 30s sảnh chờ
             game.lobbyCountdown = scheduler.schedule(() -> {
                 checkBaiCaoLobbyTimeout(chatId);
             }, 30, TimeUnit.SECONDS);
@@ -457,16 +443,6 @@ public class CasinoBot extends TelegramLongPollingBot {
         game.totalPot = game.betAmount * game.playerOrder.size();
         game.highestBet = game.betAmount;
 
-        // Chia bài giả lập đơn giản 3 lá
-        for (long pId : game.playerOrder) {
-            List<Card> hand = List.of(
-                    new Card(String.valueOf(new Random().nextInt(9) + 2), "♠️"),
-                    new Card(String.valueOf(new Random().nextInt(9) + 2), "♥️"),
-                    new Card(String.valueOf(new Random().nextInt(9) + 2), "♦️")
-            );
-            game.cards.put(pId, hand);
-        }
-
         sendBaiCaoPlayingMessage(chatId);
     }
 
@@ -494,16 +470,14 @@ public class CasinoBot extends TelegramLongPollingBot {
         msg.setReplyMarkup(new InlineKeyboardMarkup(List.of(List.of(createBtn("❌ ÚP BÀI (FOLD)", "bc_fold")))));
 
         try {
-            // Xóa tin nhắn tag cũ nếu có
             if (game.lastTagMessageId != null) {
                 deleteMessage(chatId, game.lastTagMessageId);
             }
 
             Message sent = execute(msg);
             game.messageId = sent.getMessageId();
-            game.lastTagMessageId = sent.getMessageId(); // Lưu lại để xóa ở lượt sau
+            game.lastTagMessageId = sent.getMessageId();
 
-            // Đếm ngược 50 giây cho lượt hiện tại
             game.turnCountdown = scheduler.schedule(() -> {
                 handleBaiCaoTimeout(chatId, currentUserId);
             }, 50, TimeUnit.SECONDS);
@@ -549,7 +523,6 @@ public class CasinoBot extends TelegramLongPollingBot {
         BaiCaoGame game = baicaoGames.get(chatId);
         if (game == null) return;
 
-        // Kiểm tra xem còn lại mấy người chưa úp bài
         List<Long> activePlayers = new ArrayList<>();
         for (long pId : game.playerOrder) {
             if (!game.folded.contains(pId)) activePlayers.add(pId);
@@ -564,7 +537,6 @@ public class CasinoBot extends TelegramLongPollingBot {
             return;
         }
 
-        // Chuyển sang người tiếp theo
         do {
             game.currentTurnIndex = (game.currentTurnIndex + 1) % game.playerOrder.size();
         } while (game.folded.contains(game.playerOrder.get(game.currentTurnIndex)));
@@ -573,7 +545,6 @@ public class CasinoBot extends TelegramLongPollingBot {
         sendBaiCaoPlayingMessage(chatId);
     }
 
-    // --- CÁC HÀM XÚC XẮC KHÁC ---
     private void takeDealer(long chatId, User user, String queryId) {
         DiceGame game = games.get(chatId);
         if (game == null || game.dealerId != null) {
@@ -886,7 +857,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         AnswerCallbackQuery ans = new AnswerCallbackQuery();
         ans.setCallbackQueryId(queryId);
         ans.setText(text);
-        ans.setShowAlert(true);
+ans.setShowAlert(true);
         try { execute(ans); } catch (Exception ignored) {}
     }
 
