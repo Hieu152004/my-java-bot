@@ -172,7 +172,6 @@ public class CasinoBot extends TelegramLongPollingBot {
             Message sent = execute(msg);
             game.messageId = sent.getMessageId();
 
-            // Task cập nhật đếm ngược mỗi 5 giây
             game.countdownTask = scheduler.scheduleAtFixedRate(() -> {
                 updateDiceGameTimer(chatId);
             }, 5, 5, TimeUnit.SECONDS);
@@ -191,8 +190,21 @@ public class CasinoBot extends TelegramLongPollingBot {
             sb.append("👑 <b>Cầm cái:</b> ").append(game.dealerName).append("\n");
             sb.append("⏳ <b>Thời gian còn lại:</b> ").append(Math.max(0, remainingSeconds)).append("s\n");
         }
-        sb.append("\n🔥 <b>Tài:</b> 11–18 | 💧 <b>Xỉu:</b> 3–10\n");
-        sb.append("👥 <b>Số lượt cược:</b> ").append(game.bets.size());
+
+        sb.append("\n🔥 <b>Tài:</b> 11–18\n💧 <b>Xỉu:</b> 3–10\n");
+        sb.append("\n💰 <b>Chọn mức cược bên dưới.</b>\n⚠ Mỗi người chỉ được cược 1 lần.");
+
+        if (!game.bets.isEmpty()) {
+            sb.append("\n\n📋 <b>DANH SÁCH CƯỢC</b>\n");
+            int idx = 1;
+            for (Bet bet : game.bets.values()) {
+                String icon = bet.side.equals("T") ? "🔴" : "🔵";
+                String sideName = bet.side.equals("T") ? "Tài" : "Xỉu";
+                sb.append(idx).append("- ").append(icon).append(" ").append(bet.name)
+                  .append(" → ").append(sideName).append(": ").append(formatMoney(bet.amount)).append("\n");
+                idx++;
+            }
+        }
         return sb.toString();
     }
 
@@ -273,7 +285,7 @@ public class CasinoBot extends TelegramLongPollingBot {
 
         game.dealerId = user.getId();
         game.dealerName = user.getFirstName();
-        game.startTime = System.currentTimeMillis(); // Reset thời gian đếm ngược từ lúc có cái
+        game.startTime = System.currentTimeMillis();
 
         updateGameMessage(chatId);
         answerAlert(queryId, "👑 Bạn đã cầm cái thành công!");
