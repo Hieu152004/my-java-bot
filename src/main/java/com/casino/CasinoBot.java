@@ -22,6 +22,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             System.getenv("BOT_TOKEN") : "8846203742:AAH6phjqvFPTDd6Y6xakWSu5RY7t5DiJjTA";
 
     private static final Set<Long> ADMIN_IDS = Set.of(7964831905L, 7432218242L);
+    private final long botStartupTime = System.currentTimeMillis() / 1000L;
 
     private static final long[] BET_AMOUNTS = {
             10_000_000L, 50_000_000L, 100_000_000L, 200_000_000L,
@@ -76,16 +77,75 @@ public class CasinoBot extends TelegramLongPollingBot {
         ScheduledFuture<?> countdownTask = null;
     }
 
-    private static class Card {
-        String rank;
-        String suit;
+    private static class Card implements Comparable<Card> {
+        String rank; // "2"-"10", "J", "Q", "K", "A"
+        String suit; // "♠️", "♥️", "♣️", "♦️"
+        int rankValue;
+        int suitValue; // Cơ > Rô > Chuồn > Bích => ♥️:4, ♦️:3, ♣️:2, ♠️:1
+
         Card(String rank, String suit) {
             this.rank = rank;
             this.suit = suit;
+            this.rankValue = parseRank(rank);
+            this.suitValue = parseSuit(suit);
         }
+
+        private int parseRank(String r) {
+            switch (r) {
+                case "J": return 11;
+                case "Q": return 12;
+                case "K": return 13;
+                case "A": return 14;
+                default: return Integer.parseInt(r);
+            }
+        }
+
+        private int parseSuit(String s) {
+            switch (s) {
+                case "♥️": return 4;
+                case "♦️": return 3;
+                case "♣️": return 2;
+                case "♠️": return 1;
+                default: return 0;
+            }
+        }
+
         @Override
         public String toString() {
             return rank + suit;
+        }
+
+        @Override
+        public int compareTo(Card o) {
+            if (this.rankValue != o.rankValue) {
+                return Integer.compare(this.rankValue, o.rankValue);
+            }
+            return Integer.compare(this.suitValue, o.suitValue);
+        }
+    }
+
+    private static class HandScore implements Comparable<HandScore> {
+        int type; // 4: Sáp, 3: Liêng, 2: 3 Tây, 1: Điểm thường
+        int primaryValue; // Giá trị để so sánh cao thấp
+        int subValue;
+        String description;
+
+        HandScore(int type, int primaryValue, int subValue, String description) {
+            this.type = type;
+            this.primaryValue = primaryValue;
+            this.subValue = subValue;
+            this.description = description;
+        }
+
+        @Override
+        public int compareTo(HandScore o) {
+            if (this.type != o.type) {
+                return Integer.compare(this.type, o.type);
+            }
+            if (this.primaryValue != o.primaryValue) {
+                return Integer.compare(this.primaryValue, o.primaryValue);
+            }
+            return Integer.compare(this.subValue, o.subValue);
         }
     }
 
@@ -122,7 +182,11 @@ public class CasinoBot extends TelegramLongPollingBot {
     @Override
     public void onUpdateReceived(Update update) {
         if (update.hasMessage()) {
-            handleMessage(update.getMessage());
+            Message message = update.getMessage();
+            if (message.getDate() != null && message.getDate() < botStartupTime) {
+                return;
+            }
+            handleMessage(message);
         } else if (update.hasCallbackQuery()) {
             handleCallback(update.getCallbackQuery());
         }
@@ -497,13 +561,13 @@ public class CasinoBot extends TelegramLongPollingBot {
         if (game == null) return;
 
         long currentUserId = game.playerOrder.get(game.currentTurnIndex);
-        String currentMention = getMention(currentUserId, game.players.get(currentUserId));
+        String currentName = game.players.get(currentUserId);
+        String currentMention = getMention(currentUserId, currentName);
 
         StringBuilder sb = new StringBuilder();
         sb.append("🃏 <b>BÀN BÀI TỐ ĐANG DIỄN RA</b>\n\n");
         sb.append("🏆 <b>Tổng Hũ:</b> ").append(formatFullMoney(game.totalPot)).append("\n");
-        sb.append("👉 <b>Đến lượt:</b> ").append(currentMention).append(" (⏳ 50s)\n\n");
-        sb.append("📋 <b>Trạng thái:</b>");
+        sb.append("📋 <b>Trạng thái bàn:</b>");
         for (long pId : game.playerOrder) {
             String status = game.folded.contains(pId) ? "❌ Đã Úp bài" : "💵 Cược: " + formatMoney(game.playerBets.get(pId));
             sb.append("\n- ").append(getMention(pId, game.players.get(pId))).append(": ").append(status);
@@ -523,20 +587,38 @@ public class CasinoBot extends TelegramLongPollingBot {
                 createBtn("🚀 All-in 100%", "bc_allin:100")
         ));
 
-        SendMessage msg = new SendMessage();
-        msg.setChatId(String.valueOf(chatId));
-        msg.setText(sb.toString());
-        msg.setParseMode("HTML");
-        msg.setReplyMarkup(new InlineKeyboardMarkup(rows));
-
         try {
+            // Nếu chưa có bảng bàn chơi, tạo mới 1 lần duy nhất
+            if (game.messageId == null) {
+                SendMessage msg = new SendMessage();
+                msg.setChatId(String.valueOf(chatId));
+                msg.setText(sb.toString());
+                msg.setParseMode("HTML");
+                msg.setReplyMarkup(new InlineKeyboardMarkup(rows));
+                Message sent = execute(msg);
+                game.messageId = sent.getMessageId();
+            } else {
+                // Cập nhật nội dung bảng bàn chơi cũ không tạo mới
+                EditMessageText edit = new EditMessageText();
+                edit.setChatId(String.valueOf(chatId));
+                edit.setMessageId(game.messageId);
+                edit.setText(sb.toString());
+                edit.setParseMode("HTML");
+                edit.setReplyMarkup(new InlineKeyboardMarkup(rows));
+                execute(edit);
+            }
+
+            // Gửi tin nhắn thông báo lượt và tag người chơi hiện tại
             if (game.lastTagMessageId != null) {
                 deleteMessage(chatId, game.lastTagMessageId);
             }
 
-            Message sent = execute(msg);
-            game.messageId = sent.getMessageId();
-            game.lastTagMessageId = sent.getMessageId();
+            SendMessage tagMsg = new SendMessage();
+            tagMsg.setChatId(String.valueOf(chatId));
+            tagMsg.setText("👉 <b>Đến lượt:</b> " + currentMention + " (⏳ 50s)");
+            tagMsg.setParseMode("HTML");
+            Message tagSent = execute(tagMsg);
+            game.lastTagMessageId = tagSent.getMessageId();
 
             game.turnCountdown = scheduler.schedule(() -> handleBaiCaoTimeout(chatId, currentUserId), 50, TimeUnit.SECONDS);
 
@@ -558,8 +640,9 @@ public class CasinoBot extends TelegramLongPollingBot {
             return;
         }
 
+        HandScore score = evaluateHand(hand);
         String cardsStr = hand.get(0) + " " + hand.get(1) + " " + hand.get(2);
-        answerAlert(queryId, "🃏 Bài của bạn: [ " + cardsStr + " ]");
+        answerAlert(queryId, "🃏 Bài của bạn: [ " + cardsStr + " ]\n📊 Loại bài: " + score.description);
     }
 
     private void handleBaiCaoAction(long chatId, User user, String action, long param, String queryId) {
@@ -660,11 +743,14 @@ public class CasinoBot extends TelegramLongPollingBot {
             winMsg.append("🏆 <b>KẾT THÚC VÁN BÀI TỐ</b>\n\n");
             winMsg.append("👑 <b>Người chiến thắng:</b> ").append(getMention(winnerId, game.players.get(winnerId))).append("\n");
             winMsg.append("💰 <b>Tiền thưởng:</b> +").append(formatFullMoney(game.totalPot)).append("\n\n");
-            winMsg.append("📋 <b>Bài của các người chơi:</b>");
+            winMsg.append("📋 <b>Bài và kết quả của các người chơi:</b>");
 
             for (long pId : game.playerOrder) {
                 List<Card> h = game.cards.get(pId);
-                winMsg.append("\n- ").append(getMention(pId, game.players.get(pId))).append(": [ ").append(h.get(0)).append(" ").append(h.get(1)).append(" ").append(h.get(2)).append(" ]");
+                HandScore sc = evaluateHand(h);
+                winMsg.append("\n- ").append(getMention(pId, game.players.get(pId)))
+                      .append(": [ ").append(h.get(0)).append(" ").append(h.get(1)).append(" ").append(h.get(2)).append(" ]")
+                      .append(" — <b>").append(sc.description).append("</b>");
             }
 
             if (game.lastTagMessageId != null) deleteMessage(chatId, game.lastTagMessageId);
@@ -679,8 +765,54 @@ public class CasinoBot extends TelegramLongPollingBot {
             game.currentTurnIndex = (game.currentTurnIndex + 1) % game.playerOrder.size();
         } while (game.folded.contains(game.playerOrder.get(game.currentTurnIndex)));
 
-        deleteMessage(chatId, game.messageId);
         sendBaiCaoPlayingMessage(chatId);
+    }
+
+    // Logic đánh giá bộ bài: Sáp > Liêng > 3 Tây > Điểm thường (xét chất Cơ > Rô > Chuồn > Bích)
+    private HandScore evaluateHand(List<Card> hand) {
+        Collections.sort(hand); // Sắp xếp tăng dần theo rank, sau đó theo suit
+
+        Card c1 = hand.get(0);
+        Card c2 = hand.get(1);
+        Card c3 = hand.get(2);
+
+        // 1. Kiểm tra Sáp (3 lá giống nhau)
+        if (c1.rankValue == c2.rankValue && c2.rankValue == c3.rankValue) {
+            return new HandScore(4, c1.rankValue, c3.suitValue, "Sáp " + c1.rank);
+        }
+
+        // 2. Kiểm tra Liêng (3 lá liên tiếp)
+        boolean isLieng = false;
+        int liengHighValue = c3.rankValue;
+        if (c1.rankValue + 1 == c2.rankValue && c2.rankValue + 1 == c3.rankValue) {
+            isLieng = true;
+        } else if (c1.rankValue == 2 && c2.rankValue == 3 && c3.rankValue == 14) { // Áp dụng liêng A-2-3
+            isLieng = true;
+            liengHighValue = 3; // Tính sảnh kết thúc ở 3
+        }
+
+        if (isLieng) {
+            return new HandScore(3, liengHighValue, c3.suitValue, "Liêng");
+        }
+
+        // 3. Kiểm tra 3 Tây (3 lá đầu người J, Q, K)
+        boolean isAllFace = (c1.rankValue >= 11 && c1.rankValue <= 13) &&
+                            (c2.rankValue >= 11 && c2.rankValue <= 13) &&
+                            (c3.rankValue >= 11 && c3.rankValue <= 13);
+        if (isAllFace) {
+            return new HandScore(2, c3.rankValue, c3.suitValue, "3 Tây");
+        }
+
+        // 4. Điểm thường (tính tổng % 10, Á từ 1-9 tính điểm tương ứng, JQK 10 điểm tính là 0 hoặc 10)
+        int totalPoints = 0;
+        for (Card c : hand) {
+            int p = c.rankValue;
+            if (p >= 11 && p <= 13) p = 10; // J, Q, K tính 10 điểm
+            else if (p == 14) p = 1; // A tính 1 điểm
+            totalPoints += p;
+        }
+        int score = totalPoints % 10;
+        return new HandScore(1, score, c3.suitValue, score + " điểm");
     }
 
     private void takeDealer(long chatId, User user, String queryId) {
