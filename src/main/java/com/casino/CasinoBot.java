@@ -286,41 +286,8 @@ public class CasinoBot extends TelegramLongPollingBot {
             answerAlert(query.getId(), "Điểm hiện tại của bạn là: " + formattedBal);
         } else if (data.equals("top")) {
             long[] admins = ADMIN_IDS.stream().mapToLong(l -> l).toArray();
-            sendMessage(chatId, getCustomTopText(admins));
+            sendMessage(chatId, Database.getTopText(admins));
         }
-    }
-
-    private String getCustomTopText(long[] adminIds) {
-        List<Database.UserRank> topUsers = Database.getTopUsers(10);
-        StringBuilder sb = new StringBuilder();
-        sb.append("🏆 <b>BẢNG XẾP HẠNG</b> 🏆\n\n");
-
-        int rank = 1;
-        for (Database.UserRank ur : topUsers) {
-            if (isExcluded(ur.userId, adminIds)) continue;
-
-            String medal;
-            if (rank == 1) medal = "🥇";
-            else if (rank == 2) medal = "🥈";
-            else if (rank == 3) medal = "🥉";
-            else medal = String.valueOf(rank);
-
-            String formattedMoney = formatMoney(ur.balance) + " đ.";
-            
-            // Dùng cú pháp tg://settings kết hợp mã bọc code ```` để khi người dùng ấn vào tên sẽ hiện tùy chọn sao chép (Copy)
-            String copyableName = String.format("<a href=\"tg://settings\"><code>%s</code></a>", ur.name);
-
-            sb.append("[ ").append(medal).append(" ]·").append(copyableName).append(" <").append(formattedMoney).append(">\n");
-            rank++;
-        }
-        return sb.toString();
-    }
-
-    private boolean isExcluded(long userId, long[] adminIds) {
-        for (long a : adminIds) {
-            if (a == userId) return true;
-        }
-        return false;
     }
 
     private String getMention(long userId, String name) {
