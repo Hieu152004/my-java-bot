@@ -3,72 +3,39 @@ package com.casino;
 import java.sql.*;
 
 public class Database {
-    private static final String DB_URL = "jdbc:sqlite:bot.db";
+    private static final String DB_URL = "jdbc:sqlite:casino.db";
 
-    public static void initDb() {
+    static {
         try (Connection conn = DriverManager.getConnection(DB_URL);
              Statement stmt = conn.createStatement()) {
-
-            stmt.execute("PRAGMA journal_mode=WAL;");
-            stmt.execute("PRAGMA synchronous=NORMAL;");
-
-            stmt.execute("CREATE TABLE IF NOT EXISTS users (" +
-                    "user_id INTEGER PRIMARY KEY, " +
+            String sql = "CREATE TABLE IF NOT EXISTS users (" +
+                    "user_id LONG PRIMARY KEY, " +
                     "username TEXT, " +
-                    "first_name TEXT, " +
-                    "display_name TEXT, " +
-                    "balance INTEGER NOT NULL DEFAULT 1000000000, " +
-                    "is_vip INTEGER DEFAULT 0)");
-
-            stmt.execute("CREATE TABLE IF NOT EXISTS game_history (" +
-                    "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
-                    "result TEXT NOT NULL, " +
-                    "total INTEGER NOT NULL, " +
-                    "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
-
+                    "firstname TEXT, " +
+                    "balance LONG DEFAULT 500000000, " +
+                    "is_vip INTEGER DEFAULT 0)";
+            stmt.execute(sql);
         } catch (SQLException e) {
             e.printStackTrace();
         }
     }
 
-    public static synchronized void ensureUser(long userId, String username, String firstName) {
-        String displayName = (firstName != null && !firstName.isBlank()) ? firstName : "Người dùng";
-        String selectSql = "SELECT user_id FROM users WHERE user_id = ?";
-        
+    public static synchronized void ensureUser(long userId, String username, String firstname) {
         try (Connection conn = DriverManager.getConnection(DB_URL);
-             PreparedStatement pstmt = conn.prepareStatement(selectSql)) {
-
+             PreparedStatement pstmt = conn.prepareStatement(
+                     "INSERT OR IGNORE INTO users (user_id, username, firstname, balance, is_vip) VALUES (?, ?, ?, 500000000, 0)")) {
             pstmt.setLong(1, userId);
-            ResultSet rs = pstmt.executeQuery();
-
-            if (!rs.next()) {
-                String insertSql = "INSERT INTO users (user_id, username, first_name, display_name, balance, is_vip) VALUES (?, ?, ?, ?, 1000000000, 0)";
-                try (PreparedStatement pInsert = conn.prepareStatement(insertSql)) {
-                    pInsert.setLong(1, userId);
-                    pInsert.setString(2, username);
-                    pInsert.setString(3, firstName != null ? firstName : "");
-                    pInsert.setString(4, displayName);
-                    pInsert.executeUpdate();
-                }
-            } else {
-                String updateSql = "UPDATE users SET display_name = ?, first_name = ?, username = ? WHERE user_id = ?";
-                try (PreparedStatement pUpdate = conn.prepareStatement(updateSql)) {
-                    pUpdate.setString(1, displayName);
-                    pUpdate.setString(2, firstName != null ? firstName : "");
-                    pUpdate.setString(3, username);
-                    pUpdate.setLong(4, userId);
-                    pUpdate.executeUpdate();
-                }
-            }
+            pstmt.setString(2, username != null ? username : "");
+            pstmt.setString(3, firstname != null ? firstname : "Player");
+            pstmt.executeUpdate();
         } catch (SQLException e) {
             e.printStackTrace();
         }
     }
 
     public static synchronized long getBalance(long userId) {
-        String sql = "SELECT balance FROM users WHERE user_id = ?";
         try (Connection conn = DriverManager.getConnection(DB_URL);
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+             PreparedStatement pstmt = conn.prepareStatement("SELECT balance FROM users WHERE user_id = ?")) {
             pstmt.setLong(1, userId);
             ResultSet rs = pstmt.executeQuery();
             if (rs.next()) {
@@ -81,9 +48,9 @@ public class Database {
     }
 
     public static synchronized void changeBalance(long userId, long amount) {
-        String sql = "UPDATE users SET balance = balance + ? WHERE user_id = ?";
         try (Connection conn = DriverManager.getConnection(DB_URL);
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+             PreparedStatement pstmt = conn.prepareStatement(
+                     "UPDATE users SET balance = balance + ? WHERE user_id = ?")) {
             pstmt.setLong(1, amount);
             pstmt.setLong(2, userId);
             pstmt.executeUpdate();
@@ -93,9 +60,8 @@ public class Database {
     }
 
     public static synchronized boolean isVip(long userId) {
-        String sql = "SELECT is_vip FROM users WHERE user_id = ?";
         try (Connection conn = DriverManager.getConnection(DB_URL);
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+             PreparedStatement pstmt = conn.prepareStatement("SELECT is_vip FROM users WHERE user_id = ?")) {
             pstmt.setLong(1, userId);
             ResultSet rs = pstmt.executeQuery();
             if (rs.next()) {
@@ -108,9 +74,8 @@ public class Database {
     }
 
     public static synchronized void setVipStatus(long userId, boolean status) {
-        String sql = "UPDATE users SET is_vip = ? WHERE user_id = ?";
         try (Connection conn = DriverManager.getConnection(DB_URL);
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+             PreparedStatement pstmt = conn.prepareStatement("UPDATE users SET is_vip = ? WHERE user_id = ?")) {
             pstmt.setInt(1, status ? 1 : 0);
             pstmt.setLong(2, userId);
             pstmt.executeUpdate();
@@ -120,49 +85,43 @@ public class Database {
     }
 
     public static synchronized String getTopText(long[] adminIds) {
-        StringBuilder sb = new StringBuilder("🏆 <b>BẢNG XẾP HẠNG</b> 🏆\n\n");
-        StringBuilder placeholders = new StringBuilder();
-        for (int i = 0; i < adminIds.length; i++) {
-            placeholders.append("?");
-            if (i < adminIds.length - 1) placeholders.append(",");
-        }
-
-        String sql = "SELECT display_name, balance, is_vip FROM users WHERE user_id NOT IN (" + placeholders + ") ORDER BY balance DESC LIMIT 20";
+        StringBuilder sb = new StringBuilder("🏆 <b>BẢNG XẾP HẠNG TÀI SẢN</b>\n\n");
         try (Connection conn = DriverManager.getConnection(DB_URL);
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            for (int i = 0; i < adminIds.length; i++) {
-                pstmt.setLong(i + 1, adminIds[i]);
-            }
-            ResultSet rs = pstmt.executeQuery();
-            int idx = 1;
-            boolean hasData = false;
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT user_id, firstname, balance FROM users ORDER BY balance DESC LIMIT 10")) {
+            
+            int rank = 1;
             while (rs.next()) {
-                hasData = true;
-                String icon = (idx == 1) ? "🥇" : (idx == 2) ? "🥈" : (idx == 3) ? "🥉" : String.valueOf(idx);
-                String vip = rs.getInt("is_vip") == 1 ? " ⭐VIP" : "";
-                long bal = rs.getLong("balance");
-                
-                // Định dạng hiển thị tiền gọn gàng (10M, 1B...)
-                String balStr = formatMoneyStatic(bal);
-                sb.append(String.format("【 %s 】· <b>%s%s</b> &lt;%s đ.&gt;\n", icon, rs.getString("display_name"), vip, balStr));
-                idx++;
-            }
-            if (!hasData) {
-                sb.append("Chưa có dữ liệu người chơi.");
+                long userId = rs.getLong("user_id");
+                boolean isAdmin = false;
+                for (long adminId : adminIds) {
+                    if (adminId == userId) {
+                        isAdmin = true;
+                        break;
+                    }
+                }
+                if (isAdmin) continue;
+
+                String name = rs.getString("firstname");
+                long balance = rs.getLong("balance");
+
+                String medal = "";
+                if (rank == 1) medal = "🥇 ";
+                else if (rank == 2) medal = "🥈 ";
+                else if (rank == 3) medal = "🥉 ";
+                else medal = rank + ". ";
+
+                sb.append(medal).append("<a href=\"tg://user?id=").append(userId).append("\">").append(name)
+                  .append("</a>: ").append(formatMoney(balance)).append("\n");
+                rank++;
             }
         } catch (SQLException e) {
             e.printStackTrace();
-            sb.append("Lỗi tải bảng xếp hạng.");
         }
         return sb.toString();
     }
 
-    private static String formatMoneyStatic(long amount) {
-        if (amount < 0) return "-" + formatMoneyStatic(Math.abs(amount));
-        if (amount >= 1_000_000_000_000L) {
-            double val = amount / 1_000_000_000_000.0;
-            return (val == (long) val) ? String.format("%dT", (long) val) : String.format("%.1fT", val);
-        }
+    private static String formatMoney(long amount) {
         if (amount >= 1_000_000_000L) {
             double val = amount / 1_000_000_000.0;
             return (val == (long) val) ? String.format("%dB", (long) val) : String.format("%.1fB", val);
