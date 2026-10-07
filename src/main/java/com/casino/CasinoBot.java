@@ -749,7 +749,7 @@ public class CasinoBot extends TelegramLongPollingBot {
                 Database.changeBalance(user.getId(), -need);
                 game.playerBets.put(user.getId(), game.highestBet);
                 game.totalPot += need;
-                sendMessage(chatId, "✅ " + getMention(user.getId(), user.getFirstName()) + " đã Theo thêm " + formatMoney(need) + "!");
+                sendMessage(chatId, "✅ " + getMention(user.getId(), user.getFirstName()) + " đã Theo!");
             } else {
                 sendMessage(chatId, "✅ " + getMention(user.getId(), user.getFirstName()) + " đã Theo!");
             }
@@ -808,7 +808,6 @@ public class CasinoBot extends TelegramLongPollingBot {
         }
         if (active.size() <= 1) return true;
 
-        // Ván bài chỉ kết thúc khi tất cả người chơi đang sống sót đã cược số tiền ngang bằng nhau (highestBet)
         long firstBet = game.playerBets.get(active.get(0));
         for (long pId : active) {
             if (game.playerBets.get(pId) != firstBet) {
