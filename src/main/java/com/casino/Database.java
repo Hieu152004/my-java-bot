@@ -135,16 +135,46 @@ public class Database {
             }
             ResultSet rs = pstmt.executeQuery();
             int idx = 1;
+            boolean hasData = false;
             while (rs.next()) {
+                hasData = true;
                 String icon = (idx == 1) ? "🥇" : (idx == 2) ? "🥈" : (idx == 3) ? "🥉" : String.valueOf(idx);
                 String vip = rs.getInt("is_vip") == 1 ? " ⭐VIP" : "";
                 long bal = rs.getLong("balance");
-                sb.append(String.format("【 %s 】· <b>%s%s</b> &lt;%,d đ.&gt;\n", icon, rs.getString("display_name"), vip, bal).replace(",", "."));
+                
+                // Định dạng hiển thị tiền gọn gàng (10M, 1B...)
+                String balStr = formatMoneyStatic(bal);
+                sb.append(String.format("【 %s 】· <b>%s%s</b> &lt;%s đ.&gt;\n", icon, rs.getString("display_name"), vip, balStr));
                 idx++;
+            }
+            if (!hasData) {
+                sb.append("Chưa có dữ liệu người chơi.");
             }
         } catch (SQLException e) {
             e.printStackTrace();
+            sb.append("Lỗi tải bảng xếp hạng.");
         }
         return sb.toString();
+    }
+
+    private static String formatMoneyStatic(long amount) {
+        if (amount < 0) return "-" + formatMoneyStatic(Math.abs(amount));
+        if (amount >= 1_000_000_000_000L) {
+            double val = amount / 1_000_000_000_000.0;
+            return (val == (long) val) ? String.format("%dT", (long) val) : String.format("%.1fT", val);
+        }
+        if (amount >= 1_000_000_000L) {
+            double val = amount / 1_000_000_000.0;
+            return (val == (long) val) ? String.format("%dB", (long) val) : String.format("%.1fB", val);
+        }
+        if (amount >= 1_000_000L) {
+            double val = amount / 1_000_000.0;
+            return (val == (long) val) ? String.format("%dM", (long) val) : String.format("%.1fM", val);
+        }
+        if (amount >= 1_000L) {
+            double val = amount / 1_000.0;
+            return (val == (long) val) ? String.format("%dK", (long) val) : String.format("%.1fK", val);
+        }
+        return String.valueOf(amount);
     }
 }
