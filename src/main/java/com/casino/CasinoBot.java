@@ -210,8 +210,8 @@ public class CasinoBot extends TelegramLongPollingBot {
             claimLixi(chatId, user, query.getId(), query.getMessage());
         } else if (data.equals("balance")) {
             long bal = Database.getBalance(user.getId());
-            boolean vip = Database.isVip(user.getId());
-            sendMessage(chatId, "💰 Số dư của " + user.getFirstName() + (vip ? " ⭐<b>VIP</b>" : "") + ": <b>" + formatFullMoney(bal) + "</b>");
+            String formattedBal = String.format("%,d", bal).replace(",", ".");
+            answerAlert(query.getId(), "Điểm hiện tại của bạn là: " + formattedBal);
         } else if (data.equals("top")) {
             long[] admins = ADMIN_IDS.stream().mapToLong(l -> l).toArray();
             sendMessage(chatId, Database.getTopText(admins));
@@ -503,7 +503,6 @@ public class CasinoBot extends TelegramLongPollingBot {
             sb.append("\n- ").append(getMention(pId, game.players.get(pId))).append(": ").append(status);
         }
 
-        // Bàn phím đầy đủ: Xem bài, Úp bài, Theo, Tố (1B, 5B, 10B), All-in (25%, 50%, 100%)
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
         rows.add(List.of(createBtn("👁 XEM BÀI", "bc_view_cards"), createBtn("❌ ÚP BÀI", "bc_fold")));
         rows.add(List.of(createBtn("✅ THEO", "bc_call")));
@@ -566,7 +565,6 @@ public class CasinoBot extends TelegramLongPollingBot {
             return;
         }
 
-        // Cho phép úp bài bất cứ lúc nào
         if (action.equals("fold")) {
             if (game.folded.contains(user.getId())) {
                 if (queryId != null) answerAlert(queryId, "⚠️ Bạn đã úp bài rồi!");
@@ -584,7 +582,6 @@ public class CasinoBot extends TelegramLongPollingBot {
             return;
         }
 
-        // Các hành động khác yêu cầu đúng lượt
         long currentUserId = game.playerOrder.get(game.currentTurnIndex);
         if (user.getId() != currentUserId) {
             if (queryId != null) answerAlert(queryId, "❌ Chưa tới lượt của bạn! Bạn có thể ÚP BÀI trước.");
@@ -912,7 +909,7 @@ public class CasinoBot extends TelegramLongPollingBot {
     private void sendMainMenu(long chatId) {
         SendMessage msg = new SendMessage();
         msg.setChatId(String.valueOf(chatId));
-        msg.setText("🎰 <b>HỆ THỐNG GAME</b>\n\nChọn game muốn chơi bên dưới:");
+        msg.setText("🎰 <b>HỆ THỐNG GAME CASINO (JAVA)</b>\n\nChọn game muốn chơi bên dưới:");
         msg.setParseMode("HTML");
 
         InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
@@ -1016,7 +1013,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         return String.valueOf(amount);
     }
 
-    private String formatFullMoney(long amount) {
+    privateString formatFullMoney(long amount) {
         return formatMoney(amount) + " đ";
     }
 
