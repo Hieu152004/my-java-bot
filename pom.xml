@@ -15,15 +15,18 @@
     </properties>
 
     <dependencies>
+        <!-- Thư viện Telegram Bots -->
         <dependency>
             <groupId>org.telegram</groupId>
             <artifactId>telegrambots</artifactId>
             <version>6.8.0</version>
         </dependency>
+        
+        <!-- Thư viện SQLite JDBC để lưu Database -->
         <dependency>
             <groupId>org.xerial</groupId>
             <artifactId>sqlite-jdbc</artifactId>
-            <version>3.42.0.0</version>
+            <version>3.45.1.0</version>
         </dependency>
     </dependencies>
 
