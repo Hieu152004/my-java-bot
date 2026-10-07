@@ -787,7 +787,6 @@ public class CasinoBot extends TelegramLongPollingBot {
             game.actedInCurrentRound.add(user.getId());
         }
 
-        // Kiểm tra xem có người chơi nào đã cạn sạch tiền (all-in) hoặc vòng cược đã cân bằng hay chưa -> Nếu có thì lập tức kết thúc ván so bài
         if (checkRoundShouldEnd(game)) {
             if (game.turnCountdown != null) game.turnCountdown.cancel(true);
             List<Long> activePlayers = new ArrayList<>();
@@ -809,25 +808,14 @@ public class CasinoBot extends TelegramLongPollingBot {
         }
         if (active.size() <= 1) return true;
 
-        // Nếu có ít nhất một người chơi đã cạn sạch tiền trong ví (balance == 0) và số tiền cược của tất cả đã khớp mức tối đa hoặc không thể theo thêm -> Kết thúc luôn
-        boolean anyPlayerZeroBalance = false;
-        for (long pId : active) {
-            if (Database.getBalance(pId) == 0) {
-                anyPlayerZeroBalance = true;
-                break;
-            }
-        }
-
+        // Ván bài chỉ kết thúc khi tất cả người chơi đang sống sót đã cược số tiền ngang bằng nhau (highestBet)
         long firstBet = game.playerBets.get(active.get(0));
-        boolean allBetsEqual = true;
         for (long pId : active) {
             if (game.playerBets.get(pId) != firstBet) {
-                allBetsEqual = false;
-                break;
+                return false;
             }
         }
-
-        return allBetsEqual || anyPlayerZeroBalance;
+        return true;
     }
 
     private String percentText(long p) {
