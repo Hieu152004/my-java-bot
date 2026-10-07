@@ -118,4 +118,33 @@ public class Database {
             e.printStackTrace();
         }
     }
+
+    public static synchronized String getTopText(long[] adminIds) {
+        StringBuilder sb = new StringBuilder("🏆 <b>BẢNG XẾP HẠNG</b> 🏆\n\n");
+        StringBuilder placeholders = new StringBuilder();
+        for (int i = 0; i < adminIds.length; i++) {
+            placeholders.append("?");
+            if (i < adminIds.length - 1) placeholders.append(",");
+        }
+
+        String sql = "SELECT display_name, balance, is_vip FROM users WHERE user_id NOT IN (" + placeholders + ") ORDER BY balance DESC LIMIT 20";
+        try (Connection conn = DriverManager.getConnection(DB_URL);
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            for (int i = 0; i < adminIds.length; i++) {
+                pstmt.setLong(i + 1, adminIds[i]);
+            }
+            ResultSet rs = pstmt.executeQuery();
+            int idx = 1;
+            while (rs.next()) {
+                String icon = (idx == 1) ? "🥇" : (idx == 2) ? "🥈" : (idx == 3) ? "🥉" : String.valueOf(idx);
+                String vip = rs.getInt("is_vip") == 1 ? " ⭐VIP" : "";
+                long bal = rs.getLong("balance");
+                sb.append(String.format("【 %s 】· <b>%s%s</b> &lt;%,d đ.&gt;\n", icon, rs.getString("display_name"), vip, bal).replace(",", "."));
+                idx++;
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return sb.toString();
+    }
 }
