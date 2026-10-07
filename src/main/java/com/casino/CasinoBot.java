@@ -153,6 +153,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             if (bc != null) {
                 if (bc.lobbyCountdown != null) bc.lobbyCountdown.cancel(true);
                 if (bc.turnCountdown != null) bc.turnCountdown.cancel(true);
+                if (bc.lastTagMessageId != null) deleteMessage(chatId, bc.lastTagMessageId);
             }
             lixiSessions.remove(chatId);
             sendMessage(chatId, "🔄 <b>Đã reset ván chơi!</b>\n💰 Tiền cược đã được hoàn lại.");
@@ -189,12 +190,15 @@ public class CasinoBot extends TelegramLongPollingBot {
         } else if (data.equals("bc_view_cards")) {
             showMyCards(chatId, user, query.getId());
         } else if (data.equals("bc_fold")) {
-            handleBaiCaoAction(chatId, user, "fold", 0);
+            handleBaiCaoAction(chatId, user, "fold", 0, query.getId());
         } else if (data.equals("bc_call")) {
-            handleBaiCaoAction(chatId, user, "call", 0);
+            handleBaiCaoAction(chatId, user, "call", 0, query.getId());
         } else if (data.startsWith("bc_raise:")) {
             long raiseAmt = Long.parseLong(data.split(":")[1]);
-            handleBaiCaoAction(chatId, user, "raise", raiseAmt);
+            handleBaiCaoAction(chatId, user, "raise", raiseAmt, query.getId());
+        } else if (data.startsWith("bc_allin:")) {
+            int percent = Integer.parseInt(data.split(":")[1]);
+            handleBaiCaoAction(chatId, user, "allin", percent, query.getId());
         } else if (data.equals("take_dealer")) {
             takeDealer(chatId, user, query.getId());
         } else if (data.startsWith("bet:")) {
@@ -212,6 +216,10 @@ public class CasinoBot extends TelegramLongPollingBot {
             long[] admins = ADMIN_IDS.stream().mapToLong(l -> l).toArray();
             sendMessage(chatId, Database.getTopText(admins));
         }
+    }
+
+    private String getMention(long userId, String name) {
+        return String.format("<a href=\"tg://user?id=%d\">%s</a>", userId, name);
     }
 
     private void createDiceGame(long chatId) {
@@ -350,7 +358,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         
         int idx = 1;
         for (long pId : game.playerOrder) {
-            sb.append(idx).append(". ").append(game.players.get(pId)).append("\n");
+            sb.append(idx).append(". ").append(getMention(pId, game.players.get(pId))).append("\n");
             idx++;
         }
         sb.append("\n👉 Bấm <b>THAM GIA</b> để vào bàn.\n👉 Chủ phòng bấm <b>CHIA BÀI</b> khi đủ người.");
@@ -483,28 +491,31 @@ public class CasinoBot extends TelegramLongPollingBot {
         if (game == null) return;
 
         long currentUserId = game.playerOrder.get(game.currentTurnIndex);
-        String currentName = game.players.get(currentUserId);
+        String currentMention = getMention(currentUserId, game.players.get(currentUserId));
 
         StringBuilder sb = new StringBuilder();
         sb.append("🃏 <b>BÀN BÀI TỐ ĐANG DIỄN RA</b>\n\n");
         sb.append("🏆 <b>Tổng Hũ:</b> ").append(formatFullMoney(game.totalPot)).append("\n");
-        sb.append("👉 <b>Đến lượt:</b> ").append(currentName).append(" (⏳ 50s)\n\n");
+        sb.append("👉 <b>Đến lượt:</b> ").append(currentMention).append(" (⏳ 50s)\n\n");
         sb.append("📋 <b>Trạng thái:</b>");
         for (long pId : game.playerOrder) {
             String status = game.folded.contains(pId) ? "❌ Đã Úp bài" : "💵 Cược: " + formatMoney(game.playerBets.get(pId));
-            sb.append("\n- ").append(game.players.get(pId)).append(": ").append(status);
+            sb.append("\n- ").append(getMention(pId, game.players.get(pId))).append(": ").append(status);
         }
 
-        // Tạo bàn phím đầy đủ các nút Tố, Theo, Xem, Úp bài
+        // Bàn phím đầy đủ: Xem bài, Úp bài, Theo, Tố (1B, 5B, 10B), All-in (25%, 50%, 100%)
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
-        rows.add(List.of(createBtn("👁 XEM BÀI", "bc_view_cards")));
+        rows.add(List.of(createBtn("👁 XEM BÀI", "bc_view_cards"), createBtn("❌ ÚP BÀI", "bc_fold")));
+        rows.add(List.of(createBtn("✅ THEO", "bc_call")));
         rows.add(List.of(
-                createBtn("✅ THEO", "bc_call"),
-                createBtn("❌ ÚP BÀI", "bc_fold")
+                createBtn("➕ Tố 1B", "bc_raise:1000000000"),
+                createBtn("➕ Tố 5B", "bc_raise:5000000000"),
+                createBtn("➕ Tố 10B", "bc_raise:10000000000")
         ));
         rows.add(List.of(
-                createBtn("➕ Tố 50M", "bc_raise:50000000"),
-                createBtn("➕ Tố 100M", "bc_raise:100000000")
+                createBtn("🚀 All-in 25%", "bc_allin:25"),
+                createBtn("🚀 All-in 50%", "bc_allin:50"),
+                createBtn("🚀 All-in 100%", "bc_allin:100")
         ));
 
         SendMessage msg = new SendMessage();
@@ -546,37 +557,75 @@ public class CasinoBot extends TelegramLongPollingBot {
         answerAlert(queryId, "🃏 Bài của bạn: [ " + cardsStr + " ]");
     }
 
-    private void handleBaiCaoAction(long chatId, User user, String action, long raiseAmount) {
+    private void handleBaiCaoAction(long chatId, User user, String action, long param, String queryId) {
         BaiCaoGame game = baicaoGames.get(chatId);
         if (game == null || !game.playing) return;
 
+        if (!game.players.containsKey(user.getId())) {
+            if (queryId != null) answerAlert(queryId, "❌ Bạn không tham gia bàn này!");
+            return;
+        }
+
+        // Cho phép úp bài bất cứ lúc nào
+        if (action.equals("fold")) {
+            if (game.folded.contains(user.getId())) {
+                if (queryId != null) answerAlert(queryId, "⚠️ Bạn đã úp bài rồi!");
+                return;
+            }
+            game.folded.add(user.getId());
+            sendMessage(chatId, "❌ " + getMention(user.getId(), user.getFirstName()) + " đã Úp bài!");
+            if (queryId != null) answerAlert(queryId, "✅ Đã úp bài thành công!");
+
+            long currentUserId = game.playerOrder.get(game.currentTurnIndex);
+            if (user.getId() == currentUserId) {
+                if (game.turnCountdown != null) game.turnCountdown.cancel(true);
+                advanceBaiCaoTurn(chatId);
+            }
+            return;
+        }
+
+        // Các hành động khác yêu cầu đúng lượt
         long currentUserId = game.playerOrder.get(game.currentTurnIndex);
-        if (user.getId() != currentUserId) return;
+        if (user.getId() != currentUserId) {
+            if (queryId != null) answerAlert(queryId, "❌ Chưa tới lượt của bạn! Bạn có thể ÚP BÀI trước.");
+            return;
+        }
 
         if (game.turnCountdown != null) game.turnCountdown.cancel(true);
 
-        if (action.equals("fold")) {
-            game.folded.add(user.getId());
-            sendMessage(chatId, "❌ " + user.getFirstName() + " đã Úp bài!");
-        } else if (action.equals("call")) {
+        if (action.equals("call")) {
             long need = game.highestBet - game.playerBets.get(user.getId());
             if (need > 0) {
                 Database.changeBalance(user.getId(), -need);
                 game.playerBets.put(user.getId(), game.highestBet);
                 game.totalPot += need;
             }
-            sendMessage(chatId, "✅ " + user.getFirstName() + " đã Theo!");
+            sendMessage(chatId, "✅ " + getMention(user.getId(), user.getFirstName()) + " đã Theo!");
         } else if (action.equals("raise")) {
-            long totalNeed = (game.highestBet - game.playerBets.get(user.getId())) + raiseAmount;
+            long totalNeed = (game.highestBet - game.playerBets.get(user.getId())) + param;
             Database.changeBalance(user.getId(), -totalNeed);
             long newBet = game.playerBets.get(user.getId()) + totalNeed;
             game.playerBets.put(user.getId(), newBet);
             game.highestBet = newBet;
             game.totalPot += totalNeed;
-            sendMessage(chatId, "🚀 " + user.getFirstName() + " đã Tố thêm " + formatMoney(raiseAmount) + "!");
+            sendMessage(chatId, "🚀 " + getMention(user.getId(), user.getFirstName()) + " đã Tố thêm " + formatMoney(param) + "!");
+        } else if (action.equals("allin")) {
+            long bal = Database.getBalance(user.getId());
+            long allinAmt = (long) (bal * (param / 100.0));
+            if (allinAmt <= 0) allinAmt = bal;
+            Database.changeBalance(user.getId(), -allinAmt);
+            long newBet = game.playerBets.get(user.getId()) + allinAmt;
+            game.playerBets.put(user.getId(), newBet);
+            if (newBet > game.highestBet) game.highestBet = newBet;
+            game.totalPot += allinAmt;
+            sendMessage(chatId, "🔥 " + getMention(user.getId(), user.getFirstName()) + " đã TẤT TAY " + percentText(param) + " (" + formatMoney(allinAmt) + ")!");
         }
 
         advanceBaiCaoTurn(chatId);
+    }
+
+    private String percentText(long p) {
+        return p + "%";
     }
 
     private void handleBaiCaoTimeout(long chatId, long userId) {
@@ -586,7 +635,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         long currentUserId = game.playerOrder.get(game.currentTurnIndex);
         if (currentUserId == userId) {
             game.folded.add(userId);
-            sendMessage(chatId, "⏰ <b>Quá 50 giây không thao tác, người chơi đã tự động úp bài!</b>");
+            sendMessage(chatId, "⏰ <b>Quá 50 giây không thao tác, người chơi " + getMention(userId, game.players.get(userId)) + " đã tự động úp bài!</b>");
             advanceBaiCaoTurn(chatId);
         }
     }
@@ -606,15 +655,16 @@ public class CasinoBot extends TelegramLongPollingBot {
             
             StringBuilder winMsg = new StringBuilder();
             winMsg.append("🏆 <b>KẾT THÚC VÁN BÀI TỐ</b>\n\n");
-            winMsg.append("👑 <b>Người chiến thắng:</b> ").append(game.players.get(winnerId)).append("\n");
+            winMsg.append("👑 <b>Người chiến thắng:</b> ").append(getMention(winnerId, game.players.get(winnerId))).append("\n");
             winMsg.append("💰 <b>Tiền thưởng:</b> +").append(formatFullMoney(game.totalPot)).append("\n\n");
             winMsg.append("📋 <b>Bài của các người chơi:</b>");
 
             for (long pId : game.playerOrder) {
                 List<Card> h = game.cards.get(pId);
-                winMsg.append("\n- ").append(game.players.get(pId)).append(": [ ").append(h.get(0)).append(" ").append(h.get(1)).append(" ").append(h.get(2)).append(" ]");
+                winMsg.append("\n- ").append(getMention(pId, game.players.get(pId))).append(": [ ").append(h.get(0)).append(" ").append(h.get(1)).append(" ").append(h.get(2)).append(" ]");
             }
 
+            if (game.lastTagMessageId != null) deleteMessage(chatId, game.lastTagMessageId);
             sendMessage(chatId, winMsg.toString());
             baicaoGames.remove(chatId);
             sendMainMenu(chatId);
@@ -732,10 +782,10 @@ public class CasinoBot extends TelegramLongPollingBot {
             if (b.side.equals(result)) {
                 Database.changeBalance(b.userId, b.amount * 2);
                 dealerProfit -= b.amount;
-                sb.append("✅ ").append(b.name).append(" thắng ").append(formatMoney(b.amount)).append("\n");
+                sb.append("✅ ").append(getMention(b.userId, b.name)).append(" thắng ").append(formatMoney(b.amount)).append("\n");
             } else {
                 dealerProfit += b.amount;
-                sb.append("❌ ").append(b.name).append(" thua ").append(formatMoney(b.amount)).append("\n");
+                sb.append("❌ ").append(getMention(b.userId, b.name)).append(" thua ").append(formatMoney(b.amount)).append("\n");
             }
         }
 
@@ -787,7 +837,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             lastLixiWinners.put(chatId, user.getId());
 
             answerAlert(queryId, "🎉 Bạn trúng lì xì " + formatMoney(session.amount) + "!");
-            String updateText = session.baseText + "\n\n🧧 <b>LÌ XÌ:</b> 🎉 Chúc mừng " + user.getFirstName() + " đã nhặt thành công " + formatMoney(session.amount) + "!";
+            String updateText = session.baseText + "\n\n🧧 <b>LÌ XÌ:</b> 🎉 Chúc mừng " + getMention(user.getId(), user.getFirstName()) + " đã nhặt thành công " + formatMoney(session.amount) + "!";
 
             EditMessageText edit = new EditMessageText();
             edit.setChatId(String.valueOf(chatId));
@@ -838,7 +888,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         }
         Database.changeBalance(receiverId, amount);
 
-        sendMessage(message.getChatId(), "💸 Chuyển thành công " + formatMoney(amount) + " cho " + message.getReplyToMessage().getFrom().getFirstName() + "!");
+        sendMessage(message.getChatId(), "💸 Chuyển thành công " + formatMoney(amount) + " cho " + getMention(receiverId, message.getReplyToMessage().getFrom().getFirstName()) + "!");
     }
 
     private void handleSetVip(Message message, boolean status) {
@@ -856,13 +906,13 @@ public class CasinoBot extends TelegramLongPollingBot {
         long targetId = message.getReplyToMessage().getFrom().getId();
 
         Database.changeBalance(targetId, -amount);
-        sendMessage(message.getChatId(), "🔻 Đã trừ " + formatMoney(amount) + " của " + message.getReplyToMessage().getFrom().getFirstName());
+        sendMessage(message.getChatId(), "🔻 Đã trừ " + formatMoney(amount) + " của " + getMention(targetId, message.getReplyToMessage().getFrom().getFirstName()));
     }
 
     private void sendMainMenu(long chatId) {
         SendMessage msg = new SendMessage();
         msg.setChatId(String.valueOf(chatId));
-        msg.setText("🎰 <b>HỆ THỐNG GAME CASINO (JAVA)</b>\n\nChọn game muốn chơi bên dưới:");
+        msg.setText("🎰 <b>HỆ THỐNG GAME</b>\n\nChọn game muốn chơi bên dưới:");
         msg.setParseMode("HTML");
 
         InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
