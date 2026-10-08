@@ -286,7 +286,9 @@ public class CasinoBot extends TelegramLongPollingBot {
         } else if (data.equals("roll")) {
             rollDiceManual(chatId, user, query.getId());
         } else if (data.equals("claim_lixi")) {
-            claimLixi(chatId, user, query.getId(), query.getMessage());
+            MaybeInaccessibleMessage maybeMsg = query.getMessage();
+            Message msg = (maybeMsg instanceof Message) ? (Message) maybeMsg : null;
+            claimLixi(chatId, user, query.getId(), msg);
         } else if (data.equals("balance")) {
             long bal = Database.getBalance(user.getId());
             answerAlert(query.getId(), "Điểm hiện tại của bạn là: " + formatDetailedMoney(bal) + " đ.");
