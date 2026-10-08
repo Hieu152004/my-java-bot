@@ -971,6 +971,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             previousTier = currentTier;
         }
 
+        // 🌟 KHẮC PHỤC LỖI KHÔNG CỘNG TIỀN: Thực hiện cộng tiền thưởng thực tế vào tài khoản Database của người thắng
         for (Map.Entry<Long, Long> entry : actualWinnings.entrySet()) {
             Database.changeBalance(entry.getKey(), entry.getValue());
         }
