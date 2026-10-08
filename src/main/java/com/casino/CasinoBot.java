@@ -7,6 +7,7 @@ import org.telegram.telegrambots.meta.api.methods.send.SendDice;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.Message;
+import org.telegram.telegrambots.meta.api.objects.MaybeInaccessibleMessage;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.User;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
@@ -286,7 +287,8 @@ public class CasinoBot extends TelegramLongPollingBot {
         } else if (data.equals("roll")) {
             rollDiceManual(chatId, user, query.getId());
         } else if (data.equals("claim_lixi")) {
-            Message msg = query.getMessage();
+            MaybeInaccessibleMessage maybeMsg = query.getMessage();
+            Message msg = (maybeMsg instanceof Message) ? (Message) maybeMsg : null;
             claimLixi(chatId, user, query.getId(), msg);
         } else if (data.equals("balance")) {
             long bal = Database.getBalance(user.getId());
@@ -1213,7 +1215,9 @@ public class CasinoBot extends TelegramLongPollingBot {
 
             EditMessageText edit = new EditMessageText();
             edit.setChatId(String.valueOf(chatId));
-            edit.setMessageId(message.getMessageId());
+            if (message != null) {
+                edit.setMessageId(message.getMessageId());
+            }
             edit.setText(updateText);
             edit.setParseMode("HTML");
             try { execute(edit); } catch (Exception ignored) {}
