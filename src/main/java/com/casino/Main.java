@@ -10,7 +10,7 @@ import java.net.InetSocketAddress;
 
 public class Main {
     public static void main(String[] args) {
-        // Khởi tạo SQLite
+        // Khởi tạo Database Supabase PostgreSQL
         Database.initDb();
 
         // Mở port giả lập để Render xác nhận Web Service thành công
