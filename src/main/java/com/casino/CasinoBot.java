@@ -286,8 +286,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         } else if (data.equals("roll")) {
             rollDiceManual(chatId, user, query.getId());
         } else if (data.equals("claim_lixi")) {
-            MaybeInaccessibleMessage maybeMsg = query.getMessage();
-            Message msg = (maybeMsg instanceof Message) ? (Message) maybeMsg : null;
+            Message msg = query.getMessage();
             claimLixi(chatId, user, query.getId(), msg);
         } else if (data.equals("balance")) {
             long bal = Database.getBalance(user.getId());
