@@ -121,7 +121,7 @@ public class Database {
                 else medal = rank + ". ";
 
                 sb.append(medal).append("<a href=\"tg://user?id=").append(userId).append("\">").append(name)
-                  .append("</a> <").append(formatDetailedMoney(balance)).append(" đ.>\n");
+                  .append("</a> [").append(formatDetailedMoney(balance)).append(" đ.]\n");
                 rank++;
             }
             if (!hasData) {
