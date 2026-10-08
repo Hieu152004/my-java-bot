@@ -296,7 +296,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         } else if (data.equals("top")) {
             long[] admins = ADMIN_IDS.stream().mapToLong(l -> l).toArray();
             sendMessage(chatId, Database.getTopText(admins));
-            answerAlert(query.getId(), "📊 Đã tải bảng xếp hạng!");
+            answerAlert(queryId, "📊 Đã tải bảng xếp hạng!");
         }
     }
 
@@ -401,7 +401,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
         List<InlineKeyboardButton> row = new ArrayList<>();
         for (long amt : BAICAO_BET_OPTIONS) {
-            row.add(createBtn("👉 " + formatDetailedMoney(amt) + " đ.", "bc_create:" + amt));
+            row.add(createBtn("👉 " + formatShortMoney(amt), "bc_create:" + amt));
             if (row.size() == 2) {
                 rows.add(row);
                 row = new ArrayList<>();
@@ -642,7 +642,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         long userBet = game.playerBets.getOrDefault(currentUserId, 0L);
         long needAmount = game.highestBet - userBet;
 
-        String callText = needAmount > 0 ? "✅ THEO THÊM " + formatDetailedMoney(needAmount) + " đ." : "✅ THEO (XEM)";
+        String callText = needAmount > 0 ? "✅ THEO THÊM " + formatShortMoney(needAmount) : "✅ THEO (XEM)";
 
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
         rows.add(List.of(createBtn("👁 XEM BÀI", "bc_view_cards"), createBtn("❌ ÚP BÀI", "bc_fold")));
@@ -1332,8 +1332,8 @@ public class CasinoBot extends TelegramLongPollingBot {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
         for (long amt : BET_AMOUNTS) {
             rows.add(List.of(
-                    createBtn("🔴 Tài " + formatDetailedMoney(amt), "bet:T:" + amt),
-                    createBtn("🔵 Xỉu " + formatDetailedMoney(amt), "bet:X:" + amt)
+                    createBtn("🔴 Tài " + formatShortMoney(amt), "bet:T:" + amt),
+                    createBtn("🔵 Xỉu " + formatShortMoney(amt), "bet:X:" + amt)
             ));
         }
         rows.add(List.of(createBtn("🎲 TUNG XÚC XẮC", "roll")));
@@ -1376,6 +1376,21 @@ public class CasinoBot extends TelegramLongPollingBot {
         symbols.setGroupingSeparator(',');
         DecimalFormat formatter = new DecimalFormat("#,###", symbols);
         return formatter.format(amount);
+    }
+
+    private String formatShortMoney(long amount) {
+        if (amount >= 1_000_000_000L) {
+            long b = amount / 1_000_000_000L;
+            long remainder = (amount % 1_000_000_000L) / 100_000_000L;
+            return remainder > 0 ? b + "." + remainder + "B" : b + "B";
+        } else if (amount >= 1_000_000L) {
+            long m = amount / 1_000_000L;
+            long remainder = (amount % 1_000_000L) / 100_000L;
+            return remainder > 0 ? m + "." + remainder + "M" : m + "M";
+        } else if (amount >= 1_000L) {
+            return (amount / 1_000L) + "K";
+        }
+        return String.valueOf(amount);
     }
 
     private long parseMoney(String text) {
