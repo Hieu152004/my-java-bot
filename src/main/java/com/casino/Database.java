@@ -6,6 +6,10 @@ public class Database {
     private static final String DB_URL = "jdbc:sqlite:casino.db";
 
     static {
+        initDb();
+    }
+
+    public static synchronized void initDb() {
         try (Connection conn = DriverManager.getConnection(DB_URL);
              Statement stmt = conn.createStatement()) {
             String sql = "CREATE TABLE IF NOT EXISTS users (" +
