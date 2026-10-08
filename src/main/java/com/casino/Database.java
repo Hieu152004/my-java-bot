@@ -26,16 +26,25 @@ public class Database {
 
         if (url == null || url.isBlank()) {
             String password = System.getenv("SUPABASE_DB_PASSWORD");
-            if (password == null || password.isBlank()) {
-                throw new IllegalStateException("Thiếu SUPABASE_URL hoặc SUPABASE_DB_PASSWORD trên Render.");
+            if (password != null && !password.isBlank()) {
+                url = "jdbc:postgresql://aws-0-ap-south-1.pooler.supabase.com:5432/postgres"
+                        + "?sslmode=require"
+                        + "&user=postgres.jxwngfsvfvxayueujorg"
+                        + "&password=" + java.net.URLEncoder.encode(password.trim(), java.nio.charset.StandardCharsets.UTF_8);
+            } else {
+                // Fallback để bot không chết ngay khi Render chưa được thêm Environment Variable.
+                // KHUYẾN NGHỊ: đặt SUPABASE_URL trên Render và xóa fallback này sau khi deploy.
+                url = "jdbc:postgresql://aws-0-ap-south-1.pooler.supabase.com:5432/postgres"
+                        + "?sslmode=require"
+                        + "&user=postgres.jxwngfsvfvxayueujorg"
+                        + "&password=IO0QrEg008AKJRCY";
             }
-            url = "jdbc:postgresql://aws-0-ap-south-1.pooler.supabase.com:5432/postgres"
-                    + "?sslmode=require"
-                    + "&user=postgres.jxwngfsvfvxayueujorg"
-                    + "&password=" + java.net.URLEncoder.encode(password, java.nio.charset.StandardCharsets.UTF_8);
-        } else if (url.startsWith("postgresql://")) {
+        } else {
+            url = url.trim();
+            if (url.startsWith("postgresql://")) {
             // Supabase đưa URI dạng postgresql://, PostgreSQL JDBC cần jdbc:postgresql://
-            url = "jdbc:" + url;
+                url = "jdbc:" + url;
+            }
         }
 
         String sep = url.contains("?") ? "&" : "?";
