@@ -19,7 +19,7 @@ public class Database {
     private static String buildDbUrl() {
         String url = System.getenv("SUPABASE_URL");
         if (url == null || url.isBlank()) {
-            url = "jdbc:postgresql://aws-0-ap-south-1.pooler.supabase.com:5432/postgres?sslmode=require&user=postgres.jxwngfsvfvxayueujorg&password="
+            url = "postgresql://postgres.jxwngfsvfvxayueujorg:IO0QrEg008AKJRCY@aws-0-ap-south-1.pooler.supabase.com:5432/postgres"
                     + System.getenv().getOrDefault("SUPABASE_DB_PASSWORD", "");
         }
         String sep = url.contains("?") ? "&" : "?";
