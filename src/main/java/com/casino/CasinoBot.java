@@ -225,17 +225,30 @@ public class CasinoBot extends TelegramLongPollingBot {
             DiceGame g = games.remove(chatId);
             if (g != null) {
                 if (g.countdownTask != null) g.countdownTask.cancel(true);
+                for (Bet b : g.bets.values()) {
+                    Database.changeBalance(b.userId, b.amount);
+                }
                 if (g.messageId != null) deleteMessage(chatId, g.messageId);
             }
+            
             BaiCaoGame bc = baicaoGames.remove(chatId);
             if (bc != null) {
                 if (bc.lobbyCountdown != null) bc.lobbyCountdown.cancel(true);
                 if (bc.turnCountdown != null) bc.turnCountdown.cancel(true);
+                
+                for (Map.Entry<Long, Long> entry : bc.playerBets.entrySet()) {
+                    long pId = entry.getKey();
+                    long betAmt = entry.getValue();
+                    if (betAmt > 0) {
+                        Database.changeBalance(pId, betAmt);
+                    }
+                }
+                
                 if (bc.lastTagMessageId != null) deleteMessage(chatId, bc.lastTagMessageId);
                 if (bc.messageId != null) deleteMessage(chatId, bc.messageId);
             }
             lixiSessions.remove(chatId);
-            sendMessage(chatId, "🔄 <b>Đã reset ván chơi!</b>\n💰 Tiền cược đã được hoàn lại.");
+            sendMessage(chatId, "🔄 <b>Đã reset ván chơi!</b>\n💰 Toàn bộ tiền cược đã được hoàn trả đầy đủ.");
             sendMainMenu(chatId);
         }
     }
@@ -759,7 +772,6 @@ public class CasinoBot extends TelegramLongPollingBot {
         if (action.equals("call")) {
             long need = game.highestBet - userCurrentBet;
             if (need > 0) {
-                // Nếu số dư không đủ theo, tự động All-in toàn bộ số dư còn lại của người chơi
                 long actualNeed = Math.min(need, userBal);
                 if (actualNeed <= 0) {
                     if (queryId != null) answerAlert(queryId, "❌ Số dư của bạn đã hết!");
@@ -816,8 +828,9 @@ public class CasinoBot extends TelegramLongPollingBot {
             game.actedInCurrentRound.add(user.getId());
         }
 
-        if (checkRoundShouldEnd(game)) {
+        if (checkRoundShouldEnd(game) || areAllActivePlayersAllIn(game)) {
             if (game.turnCountdown != null) game.turnCountdown.cancel(true);
+            if (game.lastTagMessageId != null) deleteMessage(chatId, game.lastTagMessageId);
             List<Long> activePlayers = new ArrayList<>();
             for (long pId : game.playerOrder) {
                 if (!game.folded.contains(pId)) activePlayers.add(pId);
@@ -828,6 +841,19 @@ public class CasinoBot extends TelegramLongPollingBot {
 
         if (game.turnCountdown != null) game.turnCountdown.cancel(true);
         advanceBaiCaoTurn(chatId);
+    }
+
+    private boolean areAllActivePlayersAllIn(BaiCaoGame game) {
+        List<Long> active = new ArrayList<>();
+        for (long pId : game.playerOrder) {
+            if (!game.folded.contains(pId)) active.add(pId);
+        }
+        for (long pId : active) {
+            if (Database.getBalance(pId) > 0) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private boolean checkRoundShouldEnd(BaiCaoGame game) {
@@ -888,7 +914,8 @@ public class CasinoBot extends TelegramLongPollingBot {
             return;
         }
 
-        if (checkRoundShouldEnd(game)) {
+        if (checkRoundShouldEnd(game) || areAllActivePlayersAllIn(game)) {
+            if (game.lastTagMessageId != null) deleteMessage(chatId, game.lastTagMessageId);
             endBaiCaoGame(chatId, activePlayers);
             return;
         }
