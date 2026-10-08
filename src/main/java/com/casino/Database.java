@@ -6,7 +6,6 @@ import java.text.DecimalFormatSymbols;
 import java.util.Locale;
 
 public class Database {
-    // Ưu tiên biến môi trường SUPABASE_URL trên Render, nếu không có sẽ dùng trực tiếp chuỗi kết nối Supabase của bạn
     private static final String DB_URL = System.getenv("SUPABASE_URL") != null ? 
             System.getenv("SUPABASE_URL") : 
             "jdbc:postgresql://db.jxwngfsvfvxayueujorg.supabase.co:5432/postgres?user=postgres&password=IO0QrEg008AKJRCY";
@@ -99,12 +98,11 @@ public class Database {
         StringBuilder sb = new StringBuilder("🏆 <b>BẢNG XẾP HẠNG TÀI SẢN</b>\n\n");
         try (Connection conn = DriverManager.getConnection(DB_URL);
              Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery("SELECT user_id, firstname, balance FROM users ORDER BY balance DESC LIMIT 10")) {
+             ResultSet rs = stmt.executeQuery("SELECT user_id, firstname, balance FROM users ORDER BY balance DESC LIMIT 20")) {
             
             int rank = 1;
             boolean hasData = false;
             while (rs.next()) {
-                hasData = true;
                 long userId = rs.getLong("user_id");
                 boolean isAdmin = false;
                 for (long adminId : adminIds) {
@@ -113,8 +111,9 @@ public class Database {
                         break;
                     }
                 }
-                if (isAdmin) continue;
+                if (isAdmin) continue; // Bỏ qua tài khoản admin trong bảng xếp hạng
 
+                hasData = true;
                 String name = rs.getString("firstname");
                 long balance = rs.getLong("balance");
 
@@ -124,9 +123,11 @@ public class Database {
                 else if (rank == 3) medal = "🥉 ";
                 else medal = rank + ". ";
 
-                sb.append(medal).append("<a href=\"tg://user?id=").append(userId).append("\">").append(name)
+                sb.append(medal).append("<a href=\"tg://user?id=").append(userId).append("\">").append(name != null ? name : "Player")
                   .append("</a> [").append(formatDetailedMoney(balance)).append(" đ.]\n");
+                
                 rank++;
+                if (rank > 10) break; // Chỉ lấy tối đa top 10 người chơi thực tế
             }
             if (!hasData) {
                 sb.append("Chưa có dữ liệu người chơi trong hệ thống.");
