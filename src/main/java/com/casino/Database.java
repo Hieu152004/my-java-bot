@@ -8,7 +8,7 @@ import java.util.Locale;
 public class Database {
     private static final String DB_URL = System.getenv("SUPABASE_URL") != null ? 
             System.getenv("SUPABASE_URL") : 
-            "jdbc:postgresql://db.jxwngfsvfvxayueujorg.supabase.co:6543/postgres?sslmode=require&user=postgres&password=IO0QrEg008AKJRCY";
+            "jdbc:postgresql://aws-0-ap-south-1.pooler.supabase.com:5432/postgres?sslmode=require&user=postgres.jxwngfsvfvxayueujorg&password=IO0QrEg008AKJRCY";
 
     static {
         initDb();
@@ -113,7 +113,7 @@ public class Database {
                         }
                     }
                 }
-                if (isAdmin) continue; // Bỏ qua tài khoản admin trong bảng xếp hạng
+                if (isAdmin) continue;
 
                 hasData = true;
                 String name = rs.getString("firstname");
@@ -130,7 +130,7 @@ public class Database {
                   .append("</a> [").append(formatDetailedMoney(balance)).append(" đ.]\n");
                 
                 rank++;
-                if (rank > 10) break; // Chỉ lấy tối đa top 10 người chơi thực tế
+                if (rank > 10) break;
             }
             if (!hasData) {
                 sb.append("Chưa có dữ liệu người chơi trong hệ thống.");
