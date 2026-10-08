@@ -759,14 +759,26 @@ public class CasinoBot extends TelegramLongPollingBot {
         if (action.equals("call")) {
             long need = game.highestBet - userCurrentBet;
             if (need > 0) {
-                if (userBal < need) {
-                    if (queryId != null) answerAlert(queryId, "❌ Số dư của bạn không đủ để theo (" + formatDetailedMoney(need) + " đ.)!");
+                // Nếu số dư không đủ theo, tự động All-in toàn bộ số dư còn lại của người chơi
+                long actualNeed = Math.min(need, userBal);
+                if (actualNeed <= 0) {
+                    if (queryId != null) answerAlert(queryId, "❌ Số dư của bạn đã hết!");
                     return;
                 }
-                Database.changeBalance(user.getId(), -need);
-                game.playerBets.put(user.getId(), game.highestBet);
-                game.totalPot += need;
-                sendMessage(chatId, "✅ " + getMention(user.getId(), user.getFirstName()) + " đã Theo!");
+                Database.changeBalance(user.getId(), -actualNeed);
+                long newBet = userCurrentBet + actualNeed;
+                game.playerBets.put(user.getId(), newBet);
+                if (newBet > game.highestBet) {
+                    game.highestBet = newBet;
+                    game.actedInCurrentRound.clear();
+                }
+                game.totalPot += actualNeed;
+                
+                if (userBal < need) {
+                    sendMessage(chatId, "🔥 " + getMention(user.getId(), user.getFirstName()) + " không đủ tiền theo nên đã TẤT TAY toàn bộ số dư (" + formatDetailedMoney(actualNeed) + " đ.)!");
+                } else {
+                    sendMessage(chatId, "✅ " + getMention(user.getId(), user.getFirstName()) + " đã Theo!");
+                }
             } else {
                 sendMessage(chatId, "✅ " + getMention(user.getId(), user.getFirstName()) + " đã Theo!");
             }
