@@ -148,4 +148,50 @@ public class Database {
         DecimalFormat formatter = new DecimalFormat("#,###", symbols);
         return formatter.format(amount);
     }
+
+    /** Trừ/cộng số dư an toàn. Với delta âm, chỉ thành công khi đủ số dư. */
+    public static synchronized boolean tryChangeBalance(long userId, long delta) {
+        String sql;
+        if (delta < 0) {
+            sql = "UPDATE users SET balance = balance + ? WHERE user_id = ? AND balance >= ?";
+        } else {
+            sql = "UPDATE users SET balance = balance + ? WHERE user_id = ?";
+        }
+        try (Connection conn = DriverManager.getConnection(DB_URL);
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setLong(1, delta);
+            pstmt.setLong(2, userId);
+            if (delta < 0) pstmt.setLong(3, -delta);
+            return pstmt.executeUpdate() == 1;
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    /** Trừ cược sàn cho cả bàn trong một transaction. Nếu bất kỳ người nào thiếu tiền, rollback toàn bộ. */
+    public static synchronized boolean tryDeductBalances(java.util.List<Long> userIds, long amount) {
+        if (userIds == null || userIds.isEmpty() || amount <= 0) return false;
+
+        String sql = "UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?";
+        try (Connection conn = DriverManager.getConnection(DB_URL);
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            conn.setAutoCommit(false);
+            for (long userId : userIds) {
+                pstmt.setLong(1, amount);
+                pstmt.setLong(2, userId);
+                pstmt.setLong(3, amount);
+                if (pstmt.executeUpdate() != 1) {
+                    conn.rollback();
+                    return false;
+                }
+            }
+            conn.commit();
+            return true;
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
 }
