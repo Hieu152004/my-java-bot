@@ -7,8 +7,9 @@ import java.util.Locale;
 
 public class Database {
     private static final String DB_URL = System.getenv("SUPABASE_URL") != null ? 
-        System.getenv("SUPABASE_URL") : 
-        "jdbc:postgresql://db.jxwngfsvfvxayueujorg.supabase.co:6543/postgres?sslmode=require&user=postgres&password=IO0QrEg008AKJRCY";
+            System.getenv("SUPABASE_URL") : 
+            "jdbc:postgresql://db.jxwngfsvfvxayueujorg.supabase.co:6543/postgres?sslmode=require&user=postgres&password=IO0QrEg008AKJRCY";
+
     static {
         initDb();
     }
@@ -97,17 +98,19 @@ public class Database {
         StringBuilder sb = new StringBuilder("🏆 <b>BẢNG XẾP HẠNG TÀI SẢN</b>\n\n");
         try (Connection conn = DriverManager.getConnection(DB_URL);
              Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery("SELECT user_id, firstname, balance FROM users ORDER BY balance DESC LIMIT 20")) {
+             ResultSet rs = stmt.executeQuery("SELECT user_id, firstname, balance FROM users ORDER BY balance DESC LIMIT 30")) {
             
             int rank = 1;
             boolean hasData = false;
             while (rs.next()) {
                 long userId = rs.getLong("user_id");
                 boolean isAdmin = false;
-                for (long adminId : adminIds) {
-                    if (adminId == userId) {
-                        isAdmin = true;
-                        break;
+                if (adminIds != null) {
+                    for (long adminId : adminIds) {
+                        if (adminId == userId) {
+                            isAdmin = true;
+                            break;
+                        }
                     }
                 }
                 if (isAdmin) continue; // Bỏ qua tài khoản admin trong bảng xếp hạng
@@ -122,7 +125,8 @@ public class Database {
                 else if (rank == 3) medal = "🥉 ";
                 else medal = rank + ". ";
 
-                sb.append(medal).append("<a href=\"tg://user?id=").append(userId).append("\">").append(name != null ? name : "Player")
+                sb.append(medal).append("<a href=\"tg://user?id=").append(userId).append("\">")
+                  .append(name != null && !name.isEmpty() ? name : "Player")
                   .append("</a> [").append(formatDetailedMoney(balance)).append(" đ.]\n");
                 
                 rank++;
