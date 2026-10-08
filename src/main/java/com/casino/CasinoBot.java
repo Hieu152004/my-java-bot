@@ -296,7 +296,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         } else if (data.equals("top")) {
             long[] admins = ADMIN_IDS.stream().mapToLong(l -> l).toArray();
             sendMessage(chatId, Database.getTopText(admins));
-            answerAlert(queryId, "📊 Đã tải bảng xếp hạng!");
+            answerAlert(query.getId(), "📊 Đã tải bảng xếp hạng!");
         }
     }
 
