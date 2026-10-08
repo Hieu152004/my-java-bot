@@ -42,7 +42,14 @@ public class CasinoBot extends TelegramLongPollingBot {
     private final Map<Long, LixiSession> lixiSessions = new ConcurrentHashMap<>();
     private final Map<Long, Long> lastLixiWinners = new ConcurrentHashMap<>();
     private final List<String> diceHistory = new CopyOnWriteArrayList<>();
-    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(4);
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(6);
+    // Tách gửi Telegram khỏi luồng xử lý update để một request mạng chậm không khóa toàn bộ game.
+    private final ExecutorService telegramExecutor = Executors.newFixedThreadPool(8);
+    private final ExecutorService callbackExecutor = Executors.newFixedThreadPool(8);
+    // Luồng xử lý update riêng: polling thread của Telegram không bao giờ bị DB/Telegram API chặn.
+    private final ExecutorService updateExecutor = Executors.newFixedThreadPool(16);
+    private final ExecutorService priorityExecutor = Executors.newFixedThreadPool(2);
+    private final ConcurrentHashMap<Long, Long> ensuredUsers = new ConcurrentHashMap<>();
 
     private static class LixiSession {
         long amount;
@@ -74,6 +81,7 @@ public class CasinoBot extends TelegramLongPollingBot {
     private static class DiceGame {
         Long dealerId = null;
         String dealerName = null;
+        long dealerBalance = 0;
         Map<Long, Bet> bets = new ConcurrentHashMap<>();
         Integer messageId = null;
         boolean rolling = false;
@@ -189,21 +197,52 @@ public class CasinoBot extends TelegramLongPollingBot {
 
     @Override
     public void onUpdateReceived(Update update) {
+        // Tuyệt đối không xử lý DB/Telegram API trực tiếp trong polling thread.
+        // Nếu Render/Telegram chậm, update mới vẫn được nhận và xếp vào worker.
+        try {
+            ExecutorService target = isPriorityCommand(update) ? priorityExecutor : updateExecutor;
+            target.execute(() -> {
+                try {
+                    processUpdate(update);
+                } catch (Throwable t) {
+                    System.err.println("[BOT] Lỗi xử lý update: " + t.getMessage());
+                    t.printStackTrace();
+                }
+            });
+        } catch (RejectedExecutionException ignored) {
+            System.err.println("[BOT] Update worker quá tải, bỏ qua update.");
+        }
+    }
+
+    private boolean isPriorityCommand(Update update) {
+        if (!update.hasMessage() || update.getMessage().getText() == null) return false;
+        String text = update.getMessage().getText().trim();
+        return text.startsWith("/reset") || text.startsWith("/restart");
+    }
+
+    private void processUpdate(Update update) {
         if (update.hasMessage()) {
             Message message = update.getMessage();
-            if (message.getDate() != null && message.getDate() < botStartupTime) {
-                return;
-            }
+            if (message.getDate() != null && message.getDate() < botStartupTime) return;
             handleMessage(message);
         } else if (update.hasCallbackQuery()) {
             handleCallback(update.getCallbackQuery());
         }
     }
 
+    private void ensureUserCached(User user) {
+        long now = System.currentTimeMillis();
+        Long last = ensuredUsers.get(user.getId());
+        if (last == null || now - last > 60_000L) {
+            Database.ensureUser(user.getId(), user.getUserName(), user.getFirstName());
+            ensuredUsers.put(user.getId(), now);
+        }
+    }
+
     private void handleMessage(Message message) {
         User user = message.getFrom();
         long chatId = message.getChatId();
-        Database.ensureUser(user.getId(), user.getUserName(), user.getFirstName());
+        ensureUserCached(user);
 
         String text = message.getText();
         if (text == null) return;
@@ -261,8 +300,9 @@ public class CasinoBot extends TelegramLongPollingBot {
         long chatId = query.getMessage().getChatId();
         User user = query.getFrom();
         String data = query.getData();
-        Database.ensureUser(user.getId(), user.getUserName(), user.getFirstName());
+        ensureUserCached(user);
 
+        // Trả popup callback càng sớm càng tốt ở các nhánh bên dưới.
         if (data.equals("new_game")) {
             if (games.containsKey(chatId) || baicaoGames.containsKey(chatId)) {
                 answerAlert(query.getId(), "⚠️ Đang có ván thi đấu diễn ra!");
@@ -334,13 +374,16 @@ public class CasinoBot extends TelegramLongPollingBot {
         msg.setParseMode("HTML");
         msg.setReplyMarkup(getDealerKeyboard());
 
-        try {
-            Message sent = execute(msg);
-            game.messageId = sent.getMessageId();
-            game.countdownTask = scheduler.scheduleAtFixedRate(() -> updateDiceGameTimer(chatId), 5, 5, TimeUnit.SECONDS);
-        } catch (TelegramApiException e) {
-            e.printStackTrace();
-        }
+        telegramExecutor.execute(() -> {
+            try {
+                Message sent = execute(msg);
+                game.messageId = sent.getMessageId();
+                game.countdownTask = scheduler.scheduleAtFixedRate(() -> updateDiceGameTimer(chatId), 5, 5, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                games.remove(chatId, game);
+                System.err.println("[BOT] Không gửi được menu Xúc Xắc: " + e.getMessage());
+            }
+        });
     }
 
     private String getDiceGameText(DiceGame game, int remainingSeconds) {
@@ -350,7 +393,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             sb.append("👑 <b>Cầm cái:</b> Chưa có\n");
         } else {
             sb.append("👑 <b>Cầm cái:</b> ").append(game.dealerName)
-              .append(" (Số dư: ").append(formatDetailedMoney(Database.getBalance(game.dealerId))).append(" đ.)\n");
+              .append(" (Số dư: ").append(formatDetailedMoney(game.dealerBalance)).append(" đ.)\n");
             sb.append("⏳ <b>Thời gian còn lại:</b> ").append(Math.max(0, remainingSeconds)).append("s\n");
         }
 
@@ -408,7 +451,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         edit.setParseMode("HTML");
         edit.setReplyMarkup(game.dealerId == null ? getDealerKeyboard() : getBettingKeyboard());
 
-        try { execute(edit); } catch (Exception ignored) {}
+        telegramExecutor.execute(() -> { try { execute(edit); } catch (Exception ignored) {} });
     }
 
     private void showBaiCaoSelectBet(long chatId, int messageId) {
@@ -430,7 +473,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         if (!row.isEmpty()) rows.add(row);
 
         edit.setReplyMarkup(new InlineKeyboardMarkup(rows));
-        try { execute(edit); } catch (Exception ignored) {}
+        telegramExecutor.execute(() -> { try { execute(edit); } catch (Exception ignored) {} });
     }
 
     private void createBaiCaoLobby(long chatId, User user, long betAmount) {
@@ -453,13 +496,16 @@ public class CasinoBot extends TelegramLongPollingBot {
         msg.setParseMode("HTML");
         msg.setReplyMarkup(getBaiCaoLobbyKeyboard());
 
-        try {
-            Message sent = execute(msg);
-            game.messageId = sent.getMessageId();
-            game.lobbyCountdown = scheduler.schedule(() -> checkBaiCaoLobbyTimeout(chatId), 30, TimeUnit.SECONDS);
-        } catch (TelegramApiException e) {
-            e.printStackTrace();
-        }
+        telegramExecutor.execute(() -> {
+            try {
+                Message sent = execute(msg);
+                game.messageId = sent.getMessageId();
+                game.lobbyCountdown = scheduler.schedule(() -> checkBaiCaoLobbyTimeout(chatId), 30, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                baicaoGames.remove(chatId, game);
+                System.err.println("[BOT] Không gửi được lobby Bài Tố: " + e.getMessage());
+            }
+        });
     }
 
     private String getBaiCaoLobbyText(BaiCaoGame game, int remaining) {
@@ -541,7 +587,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         edit.setParseMode("HTML");
         edit.setReplyMarkup(getBaiCaoLobbyKeyboard());
 
-        try { execute(edit); } catch (Exception ignored) {}
+        telegramExecutor.execute(() -> { try { execute(edit); } catch (Exception ignored) {} });
     }
 
     private void dealBaiCaoCards(long chatId, User user, String queryId) {
@@ -627,12 +673,14 @@ public class CasinoBot extends TelegramLongPollingBot {
             msg.setText(getBaiCaoPlayingText(game, 50));
             msg.setParseMode("HTML");
             msg.setReplyMarkup(getBaiCaoPlayingKeyboard(game));
-            try {
-                Message sent = execute(msg);
-                game.messageId = sent.getMessageId();
-            } catch (TelegramApiException e) {
-                e.printStackTrace();
-            }
+            telegramExecutor.execute(() -> {
+                try {
+                    Message sent = execute(msg);
+                    game.messageId = sent.getMessageId();
+                } catch (Exception e) {
+                    System.err.println("[BOT] Không gửi được màn Bài Tố: " + e.getMessage());
+                }
+            });
         } else {
             updateBaiCaoPlayingMessage(chatId, 50);
         }
@@ -645,8 +693,12 @@ public class CasinoBot extends TelegramLongPollingBot {
             tagMsg.setChatId(String.valueOf(chatId));
             tagMsg.setText("👉 <b>Đến lượt:</b> " + getMention(currentUserId, game.players.get(currentUserId)) + " (⏳ 50s)");
             tagMsg.setParseMode("HTML");
-            Message tagSent = execute(tagMsg);
-            game.lastTagMessageId = tagSent.getMessageId();
+            telegramExecutor.execute(() -> {
+                try {
+                    Message tagSent = execute(tagMsg);
+                    game.lastTagMessageId = tagSent.getMessageId();
+                } catch (Exception ignored) {}
+            });
         } catch (Exception ignored) {}
 
         if (game.turnCountdown != null) game.turnCountdown.cancel(true);
@@ -709,7 +761,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         edit.setParseMode("HTML");
         edit.setReplyMarkup(getBaiCaoPlayingKeyboard(game));
 
-        try { execute(edit); } catch (Exception ignored) {}
+        telegramExecutor.execute(() -> { try { execute(edit); } catch (Exception ignored) {} });
     }
 
     private void updateBaiCaoTurnTimer(long chatId) {
@@ -843,7 +895,7 @@ public class CasinoBot extends TelegramLongPollingBot {
                     game.totalPot += need;
                     game.actedInCurrentRound.add(userId);
                     actionAccepted = true;
-                    if (Database.getBalance(userId) == 0) game.allInPlayers.add(userId);
+                    if (userBal == need) game.allInPlayers.add(userId);
                     sendMessage(chatId, "✅ " + getMention(userId, user.getFirstName()) + " đã Theo!");
                 }
             } else if (action.equals("raise_pct")) {
@@ -877,7 +929,7 @@ public class CasinoBot extends TelegramLongPollingBot {
                 game.totalPot += totalNeed;
                 game.actedInCurrentRound.clear();
                 game.actedInCurrentRound.add(userId);
-                if (Database.getBalance(userId) == 0) game.allInPlayers.add(userId);
+                if (userBal == totalNeed) game.allInPlayers.add(userId);
                 actionAccepted = true;
                 sendMessage(chatId, "📈 " + getMention(userId, user.getFirstName()) + " đã Tố 50% số dư: thêm " + formatDetailedMoney(raiseAmt) + " đ.! ");
             } else if (action.equals("raise")) {
@@ -901,7 +953,7 @@ public class CasinoBot extends TelegramLongPollingBot {
                 game.totalPot += totalNeed;
                 game.actedInCurrentRound.clear();
                 game.actedInCurrentRound.add(userId);
-                if (Database.getBalance(userId) == 0) game.allInPlayers.add(userId);
+                if (userBal == totalNeed) game.allInPlayers.add(userId);
                 actionAccepted = true;
                 sendMessage(chatId, "🚀 " + getMention(userId, user.getFirstName()) + " đã Tố thêm " + formatDetailedMoney(param) + " đ.! ");
             } else if (action.equals("allin")) {
@@ -1256,6 +1308,7 @@ public class CasinoBot extends TelegramLongPollingBot {
 
         game.dealerId = user.getId();
         game.dealerName = user.getFirstName();
+        game.dealerBalance = bal;
         game.startTime = System.currentTimeMillis();
 
         updateGameMessage(chatId);
@@ -1342,7 +1395,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             }
         }
         sb.append("\n<i>Đang gieo xúc xắc... Vui lòng đợi!</i>");
-        sendMessage(chatId, sb.toString());
+        sendMessageSync(chatId, sb.toString());
 
         new Thread(() -> {
             try {
@@ -1451,7 +1504,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             }
             edit.setText(updateText);
             edit.setParseMode("HTML");
-            try { execute(edit); } catch (Exception ignored) {}
+            telegramExecutor.execute(() -> { try { execute(edit); } catch (Exception ignored) {} });
         } else {
             answerAlert(queryId, "❌ Trượt rồi! Chúc bạn may mắn lần sau (" + session.clickCount + "/5).");
         }
@@ -1556,7 +1609,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         markup.setKeyboard(rows);
         msg.setReplyMarkup(markup);
 
-        try { execute(msg); } catch (Exception ignored) {}
+        telegramExecutor.execute(() -> { try { execute(msg); } catch (Exception ignored) {} });
     }
 
     private void updateGameMessage(long chatId) {
@@ -1573,7 +1626,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         edit.setParseMode("HTML");
         edit.setReplyMarkup(game.dealerId == null ? getDealerKeyboard() : getBettingKeyboard());
 
-        try { execute(edit); } catch (Exception ignored) {}
+        telegramExecutor.execute(() -> { try { execute(edit); } catch (Exception ignored) {} });
     }
 
     private InlineKeyboardMarkup getDealerKeyboard() {
@@ -1602,17 +1655,30 @@ public class CasinoBot extends TelegramLongPollingBot {
         sendMessageWithMarkup(chatId, text, null);
     }
 
+    // Dùng cho các luồng cần giữ thứ tự tuyệt đối (ví dụ trước khi gửi SendDice).
+    private void sendMessageSync(long chatId, String text) {
+        SendMessage msg = new SendMessage();
+        msg.setChatId(String.valueOf(chatId));
+        msg.setText(text);
+        msg.setParseMode("HTML");
+        telegramExecutor.execute(() -> { try { execute(msg); } catch (Exception ignored) {} });
+    }
+
     private void sendMessageWithMarkup(long chatId, String text, InlineKeyboardMarkup markup) {
         SendMessage msg = new SendMessage();
         msg.setChatId(String.valueOf(chatId));
         msg.setText(text);
         msg.setParseMode("HTML");
         if (markup != null) msg.setReplyMarkup(markup);
-        try { execute(msg); } catch (Exception ignored) {}
+        telegramExecutor.execute(() -> {
+            try { execute(msg); } catch (Exception ignored) {}
+        });
     }
 
     private void deleteMessage(long chatId, int messageId) {
-        try { execute(new DeleteMessage(String.valueOf(chatId), messageId)); } catch (Exception ignored) {}
+        telegramExecutor.execute(() -> {
+            try { execute(new DeleteMessage(String.valueOf(chatId), messageId)); } catch (Exception ignored) {}
+        });
     }
 
     private void answerAlert(String queryId, String text) {
@@ -1620,7 +1686,10 @@ public class CasinoBot extends TelegramLongPollingBot {
         ans.setCallbackQueryId(queryId);
         ans.setText(text);
         ans.setShowAlert(true);
-        try { execute(ans); } catch (Exception ignored) {}
+        // Popup phải được gửi ngay, không chờ DB/sendMessage phía sau.
+        callbackExecutor.execute(() -> {
+            try { execute(ans); } catch (Exception ignored) {}
+        });
     }
 
     private String formatDetailedMoney(long amount) {
@@ -1657,4 +1726,12 @@ public class CasinoBot extends TelegramLongPollingBot {
             return 0;
         }
     }
+    public void shutdownExecutors() {
+        scheduler.shutdownNow();
+        telegramExecutor.shutdownNow();
+        callbackExecutor.shutdownNow();
+        updateExecutor.shutdownNow();
+        priorityExecutor.shutdownNow();
+    }
+
 }
