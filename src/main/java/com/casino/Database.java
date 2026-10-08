@@ -6,7 +6,10 @@ import java.text.DecimalFormatSymbols;
 import java.util.Locale;
 
 public class Database {
-    private static final String DB_URL = "jdbc:sqlite:casino.db";
+    // Ưu tiên biến môi trường SUPABASE_URL trên Render, nếu không có sẽ dùng trực tiếp chuỗi kết nối Supabase của bạn
+    private static final String DB_URL = System.getenv("SUPABASE_URL") != null ? 
+            System.getenv("SUPABASE_URL") : 
+            "jdbc:postgresql://db.jxwngfsvfvxayueujorg.supabase.co:5432/postgres?user=postgres&password=IO0QrEg008AKJRCY";
 
     static {
         initDb();
@@ -16,11 +19,11 @@ public class Database {
         try (Connection conn = DriverManager.getConnection(DB_URL);
              Statement stmt = conn.createStatement()) {
             String sql = "CREATE TABLE IF NOT EXISTS users (" +
-                    "user_id LONG PRIMARY KEY, " +
+                    "user_id BIGINT PRIMARY KEY, " +
                     "username TEXT, " +
                     "firstname TEXT, " +
-                    "balance LONG DEFAULT 500000000, " +
-                    "is_vip INTEGER DEFAULT 0)";
+                    "balance BIGINT DEFAULT 500000000, " +
+                    "is_vip INT DEFAULT 0)";
             stmt.execute(sql);
         } catch (SQLException e) {
             e.printStackTrace();
@@ -30,7 +33,8 @@ public class Database {
     public static synchronized void ensureUser(long userId, String username, String firstname) {
         try (Connection conn = DriverManager.getConnection(DB_URL);
              PreparedStatement pstmt = conn.prepareStatement(
-                     "INSERT OR IGNORE INTO users (user_id, username, firstname, balance, is_vip) VALUES (?, ?, ?, 500000000, 0)")) {
+                     "INSERT INTO users (user_id, username, firstname, balance, is_vip) VALUES (?, ?, ?, 500000000, 0) " +
+                     "ON CONFLICT (user_id) DO NOTHING")) {
             pstmt.setLong(1, userId);
             pstmt.setString(2, username != null ? username : "");
             pstmt.setString(3, firstname != null ? firstname : "Player");
