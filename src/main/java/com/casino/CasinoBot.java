@@ -354,9 +354,13 @@ public class CasinoBot extends TelegramLongPollingBot {
             long bal = Database.getBalance(user.getId());
             answerAlert(query.getId(), "Điểm hiện tại của bạn là: " + formatDetailedMoney(bal) + " đ.");
         } else if (data.equals("top")) {
+            // Phản hồi nút ngay, không chờ truy vấn Supabase.
+            answerAlert(query.getId(), "📊 Đang tải bảng xếp hạng...");
             long[] admins = ADMIN_IDS.stream().mapToLong(l -> l).toArray();
-            sendMessage(chatId, Database.getTopText(admins));
-            answerAlert(query.getId(), "📊 Đã tải bảng xếp hạng!");
+            telegramExecutor.execute(() -> {
+                String top = Database.getTopText(admins);
+                sendMessage(chatId, top);
+            });
         }
     }
 
