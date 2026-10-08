@@ -17,19 +17,39 @@ public class Database {
     private static final String DB_URL = buildDbUrl();
 
     private static String buildDbUrl() {
+        // Render: đặt SUPABASE_URL bằng chuỗi PostgreSQL của Supabase.
+        // Có thể dùng:
+        // postgresql://USER:PASSWORD@HOST:5432/postgres
+        // hoặc JDBC URL:
+        // jdbc:postgresql://HOST:5432/postgres?user=...&password=...
         String url = System.getenv("SUPABASE_URL");
+
         if (url == null || url.isBlank()) {
-            url = "postgresql://postgres.jxwngfsvfvxayueujorg:IO0QrEg008AKJRCY@aws-0-ap-south-1.pooler.supabase.com:5432/postgres"
-                    + System.getenv().getOrDefault("SUPABASE_DB_PASSWORD", "");
+            String password = System.getenv("SUPABASE_DB_PASSWORD");
+            if (password == null || password.isBlank()) {
+                throw new IllegalStateException("Thiếu SUPABASE_URL hoặc SUPABASE_DB_PASSWORD trên Render.");
+            }
+            url = "jdbc:postgresql://aws-0-ap-south-1.pooler.supabase.com:5432/postgres"
+                    + "?sslmode=require"
+                    + "&user=postgres.jxwngfsvfvxayueujorg"
+                    + "&password=" + java.net.URLEncoder.encode(password, java.nio.charset.StandardCharsets.UTF_8);
+        } else if (url.startsWith("postgresql://")) {
+            // Supabase đưa URI dạng postgresql://, PostgreSQL JDBC cần jdbc:postgresql://
+            url = "jdbc:" + url;
         }
+
         String sep = url.contains("?") ? "&" : "?";
+        if (!url.contains("sslmode=")) url += sep + "sslmode=require";
+        sep = url.contains("?") ? "&" : "?";
         if (!url.contains("connectTimeout=")) url += sep + "connectTimeout=4";
-        if (!url.contains("socketTimeout=")) url += "&socketTimeout=8";
-        if (!url.contains("tcpKeepAlive=")) url += "&tcpKeepAlive=true";
+        sep = url.contains("?") ? "&" : "?";
+        if (!url.contains("socketTimeout=")) url += sep + "socketTimeout=8";
+        sep = url.contains("?") ? "&" : "?";
+        if (!url.contains("tcpKeepAlive=")) url += sep + "tcpKeepAlive=true";
         return url;
     }
 
-    private static final int POOL_SIZE = 12;
+    private static final int POOL_SIZE = 4;
     private static final BlockingQueue<Connection> CONNECTION_POOL = new ArrayBlockingQueue<>(POOL_SIZE);
 
     static {
@@ -55,12 +75,25 @@ public class Database {
         Connection c = CONNECTION_POOL.poll();
         if (c != null) {
             try {
-                // Không gọi isValid(2) ở mỗi thao tác: đây có thể là một round-trip mạng
-                // và chính nó gây cảm giác chậm vài giây khi Supabase/Render dao động.
-                if (!c.isClosed()) return c;
+                if (!c.isClosed() && c.isValid(1)) return c;
             } catch (SQLException ignored) {}
             try { c.close(); } catch (SQLException ignored) {}
         }
+
+        // Không tạo connection mới liên tục khi pool đang bận.
+        // Chờ tối đa 2 giây để lấy lại connection, tránh connection storm.
+        try {
+            c = CONNECTION_POOL.poll(2, java.util.concurrent.TimeUnit.SECONDS);
+            if (c != null) {
+                try {
+                    if (!c.isClosed() && c.isValid(1)) return c;
+                } catch (SQLException ignored) {}
+                try { c.close(); } catch (SQLException ignored) {}
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
         return DriverManager.getConnection(DB_URL);
     }
 
@@ -73,6 +106,13 @@ public class Database {
         } catch (Exception e) {
             try { c.close(); } catch (Exception ignored) {}
         }
+    }
+
+    private static boolean isTransient(SQLException e) {
+        String m = e.getMessage();
+        if (m == null) return true;
+        String x = m.toLowerCase(Locale.ROOT);
+        return x.contains("connection") || x.contains("timeout") || x.contains("network") || x.contains("closed");
     }
 
     public static void initDb() {
@@ -243,40 +283,48 @@ public class Database {
 
     public static String getTopText(long[] adminIds) {
         StringBuilder sb = new StringBuilder("🏆 <b>BẢNG XẾP HẠNG TÀI SẢN</b>\n\n");
-        Connection conn = null;
-        try {
-            conn = borrowConnection();
-            try (Statement stmt = conn.createStatement();
-                 ResultSet rs = stmt.executeQuery("SELECT user_id, firstname, balance FROM users ORDER BY balance DESC LIMIT 30")) {
-                int rank = 1;
-                boolean hasData = false;
-                while (rs.next()) {
-                    long userId = rs.getLong("user_id");
-                    boolean isAdmin = false;
-                    if (adminIds != null) {
-                        for (long adminId : adminIds) {
-                            if (adminId == userId) { isAdmin = true; break; }
+        SQLException last = null;
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            Connection conn = null;
+            try {
+                conn = borrowConnection();
+                try (Statement stmt = conn.createStatement()) {
+                    stmt.setQueryTimeout(5);
+                    try (ResultSet rs = stmt.executeQuery("SELECT user_id, firstname, balance FROM users ORDER BY balance DESC LIMIT 30")) {
+                        int rank = 1;
+                        boolean hasData = false;
+                        while (rs.next()) {
+                            long userId = rs.getLong("user_id");
+                            boolean isAdmin = false;
+                            if (adminIds != null) {
+                                for (long adminId : adminIds) {
+                                    if (adminId == userId) { isAdmin = true; break; }
+                                }
+                            }
+                            if (isAdmin) continue;
+                            hasData = true;
+                            String name = rs.getString("firstname");
+                            long balance = rs.getLong("balance");
+                            String medal = rank == 1 ? "🥇 " : rank == 2 ? "🥈 " : rank == 3 ? "🥉 " : rank + ". ";
+                            sb.append(medal).append("<a href=\"tg://user?id=").append(userId).append("\">")
+                              .append(name != null && !name.isEmpty() ? name : "Player")
+                              .append("</a> [").append(formatDetailedMoney(balance)).append(" đ.]\n");
+                            if (++rank > 10) break;
                         }
+                        if (!hasData) sb.append("Chưa có dữ liệu người chơi trong hệ thống.");
                     }
-                    if (isAdmin) continue;
-                    hasData = true;
-                    String name = rs.getString("firstname");
-                    long balance = rs.getLong("balance");
-                    String medal = rank == 1 ? "🥇 " : rank == 2 ? "🥈 " : rank == 3 ? "🥉 " : rank + ". ";
-                    sb.append(medal).append("<a href=\"tg://user?id=").append(userId).append("\">")
-                      .append(name != null && !name.isEmpty() ? name : "Player")
-                      .append("</a> [").append(formatDetailedMoney(balance)).append(" đ.]\n");
-                    if (++rank > 10) break;
                 }
-                if (!hasData) sb.append("Chưa có dữ liệu người chơi trong hệ thống.");
+                return sb.toString();
+            } catch (SQLException e) {
+                last = e;
+                if (!isTransient(e) || attempt == 2) break;
+                try { Thread.sleep(100); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+            } finally {
+                returnConnection(conn);
             }
-        } catch (SQLException e) {
-            e.printStackTrace();
-            return "❌ Lỗi khi tải bảng xếp hạng từ cơ sở dữ liệu.";
-        } finally {
-            returnConnection(conn);
         }
-        return sb.toString();
+        if (last != null) last.printStackTrace();
+        return "❌ Không thể kết nối cơ sở dữ liệu lúc này. Vui lòng thử lại sau 1 giây.";
     }
 
     private static String formatDetailedMoney(long amount) {
