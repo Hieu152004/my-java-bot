@@ -7,9 +7,8 @@ import java.util.Locale;
 
 public class Database {
     private static final String DB_URL = System.getenv("SUPABASE_URL") != null ? 
-            System.getenv("SUPABASE_URL") : 
-            "jdbc:postgresql://db.jxwngfsvfvxayueujorg.supabase.co:5432/postgres?user=postgres&password=IO0QrEg008AKJRCY";
-
+        System.getenv("SUPABASE_URL") : 
+        "jdbc:postgresql://db.jxwngfsvfvxayueujorg.supabase.co:6543/postgres?sslmode=require&user=postgres&password=IO0QrEg008AKJRCY";
     static {
         initDb();
     }
