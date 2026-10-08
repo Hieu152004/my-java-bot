@@ -1,6 +1,9 @@
 package com.casino;
 
 import java.sql.*;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
+import java.util.Locale;
 
 public class Database {
     private static final String DB_URL = "jdbc:sqlite:casino.db";
@@ -95,7 +98,9 @@ public class Database {
              ResultSet rs = stmt.executeQuery("SELECT user_id, firstname, balance FROM users ORDER BY balance DESC LIMIT 10")) {
             
             int rank = 1;
+            boolean hasData = false;
             while (rs.next()) {
+                hasData = true;
                 long userId = rs.getLong("user_id");
                 boolean isAdmin = false;
                 for (long adminId : adminIds) {
@@ -116,28 +121,23 @@ public class Database {
                 else medal = rank + ". ";
 
                 sb.append(medal).append("<a href=\"tg://user?id=").append(userId).append("\">").append(name)
-                  .append("</a>: ").append(formatMoney(balance)).append("\n");
+                  .append("</a> <").append(formatDetailedMoney(balance)).append(" đ.>\n");
                 rank++;
+            }
+            if (!hasData) {
+                sb.append("Chưa có dữ liệu người chơi trong hệ thống.");
             }
         } catch (SQLException e) {
             e.printStackTrace();
+            return "❌ Lỗi khi tải bảng xếp hạng từ cơ sở dữ liệu.";
         }
         return sb.toString();
     }
 
-    private static String formatMoney(long amount) {
-        if (amount >= 1_000_000_000L) {
-            double val = amount / 1_000_000_000.0;
-            return (val == (long) val) ? String.format("%dB", (long) val) : String.format("%.1fB", val);
-        }
-        if (amount >= 1_000_000L) {
-            double val = amount / 1_000_000.0;
-            return (val == (long) val) ? String.format("%dM", (long) val) : String.format("%.1fM", val);
-        }
-        if (amount >= 1_000L) {
-            double val = amount / 1_000.0;
-            return (val == (long) val) ? String.format("%dK", (long) val) : String.format("%.1fK", val);
-        }
-        return String.valueOf(amount);
+    private static String formatDetailedMoney(long amount) {
+        DecimalFormatSymbols symbols = new DecimalFormatSymbols(Locale.getDefault());
+        symbols.setGroupingSeparator(',');
+        DecimalFormat formatter = new DecimalFormat("#,###", symbols);
+        return formatter.format(amount);
     }
 }
