@@ -290,6 +290,9 @@ public class CasinoBot extends TelegramLongPollingBot {
             handleBaiCaoAction(chatId, user, "fold", 0, query.getId());
         } else if (data.equals("bc_call")) {
             handleBaiCaoAction(chatId, user, "call", 0, query.getId());
+        } else if (data.startsWith("bc_raise_pct:")) {
+            int percent = Integer.parseInt(data.split(":")[1]);
+            handleBaiCaoAction(chatId, user, "raise_pct", percent, query.getId());
         } else if (data.startsWith("bc_raise:")) {
             long raiseAmt = Long.parseLong(data.split(":")[1]);
             handleBaiCaoAction(chatId, user, "raise", raiseAmt, query.getId());
@@ -677,6 +680,14 @@ public class CasinoBot extends TelegramLongPollingBot {
         rows.add(List.of(createBtn("👁 XEM BÀI", "bc_view_cards"), createBtn("❌ ÚP BÀI", "bc_fold")));
         rows.add(List.of(createBtn(callText, "bc_call")));
         rows.add(List.of(
+                createBtn("➕ Tố 100M", "bc_raise:100000000"),
+                createBtn("➕ Tố 200M", "bc_raise:200000000"),
+                createBtn("➕ Tố 500M", "bc_raise:500000000")
+        ));
+        rows.add(List.of(
+                createBtn("📈 Tố 50% số dư", "bc_raise_pct:50")
+        ));
+        rows.add(List.of(
                 createBtn("➕ Tố 1B", "bc_raise:1000000000"),
                 createBtn("➕ Tố 5B", "bc_raise:5000000000"),
                 createBtn("➕ Tố 10B", "bc_raise:10000000000")
@@ -835,6 +846,40 @@ public class CasinoBot extends TelegramLongPollingBot {
                     if (Database.getBalance(userId) == 0) game.allInPlayers.add(userId);
                     sendMessage(chatId, "✅ " + getMention(userId, user.getFirstName()) + " đã Theo!");
                 }
+            } else if (action.equals("raise_pct")) {
+                // Tố theo phần trăm số dư hiện tại. 50% = một nửa số dư còn lại.
+                if (param != 50) {
+                    if (queryId != null) answerAlert(queryId, "❌ Mức tố phần trăm không hợp lệ!");
+                    return;
+                }
+                if (userBal <= 0) {
+                    if (queryId != null) answerAlert(queryId, "❌ Số dư của bạn đã hết, không thể tố thêm.");
+                    return;
+                }
+                long raiseAmt = userBal / 2;
+                if (raiseAmt <= 0) {
+                    if (queryId != null) answerAlert(queryId, "❌ Số dư quá nhỏ để Tố 50%.");
+                    return;
+                }
+                long needToCall = Math.max(0L, game.highestBet - userCurrentBet);
+                long totalNeed = needToCall + raiseAmt;
+                if (userBal < totalNeed) {
+                    if (queryId != null) answerAlert(queryId, "❌ Không đủ tiền để Theo + Tố 50% số dư. Cần " + formatDetailedMoney(totalNeed) + " đ. hoặc chọn TẤT TAY.");
+                    return;
+                }
+                if (!Database.tryChangeBalance(userId, -totalNeed)) {
+                    if (queryId != null) answerAlert(queryId, "❌ Số dư vừa thay đổi, vui lòng thử lại.");
+                    return;
+                }
+                long newBet = userCurrentBet + totalNeed;
+                game.playerBets.put(userId, newBet);
+                game.highestBet = newBet;
+                game.totalPot += totalNeed;
+                game.actedInCurrentRound.clear();
+                game.actedInCurrentRound.add(userId);
+                if (Database.getBalance(userId) == 0) game.allInPlayers.add(userId);
+                actionAccepted = true;
+                sendMessage(chatId, "📈 " + getMention(userId, user.getFirstName()) + " đã Tố 50% số dư: thêm " + formatDetailedMoney(raiseAmt) + " đ.! ");
             } else if (action.equals("raise")) {
                 if (param <= 0) {
                     if (queryId != null) answerAlert(queryId, "❌ Mức tố không hợp lệ!");
@@ -1050,16 +1095,31 @@ public class CasinoBot extends TelegramLongPollingBot {
                 }
 
                 if (eligible.isEmpty()) {
-                    // Không có người đủ điều kiện ở tầng này: đây là phần cược thừa
-                    // không được đối thủ theo, trả lại cho người đóng góp còn sống.
-                    // Trường hợp bình thường gần như không xảy ra nếu game kết thúc
-                    // bằng đúng điều kiện, nhưng vẫn bảo vệ tiền.
-                    long each = potSlice / layerContributors.size();
-                    long remainder = potSlice % layerContributors.size();
-                    for (int i = 0; i < layerContributors.size(); i++) {
-                        long amount = each + (i < remainder ? 1 : 0);
-                        winnings.put(layerContributors.get(i), winnings.getOrDefault(layerContributors.get(i), 0L) + amount);
-                        returnedUncalled += amount;
+                    /*
+                     * QUAN TRỌNG:
+                     * Nếu tầng này chỉ còn tiền của người ĐÃ ÚP BÀI thì tiền đó
+                     * KHÔNG được hoàn lại cho người đã úp. Đây là tiền chết (dead money)
+                     * và vẫn thuộc về hũ của những người còn sống.
+                     *
+                     * Ví dụ:
+                     *   BI cược 10B rồi ÚP, XIAO cược 2B và còn chơi.
+                     *   8B chênh của BI vẫn nằm trong hũ. XIAO có thể ăn toàn bộ
+                     *   hũ 12B nếu thắng.
+                     *
+                     * Chỉ tiền cược THỪA của người còn sống/all-in mới có thể hoàn lại,
+                     * và phần đó được xử lý riêng ở bước uncalled bên dưới.
+                     */
+                    List<Long> fallbackEligible = new ArrayList<>();
+                    for (long pId : game.playerOrder) {
+                        if (!game.folded.contains(pId) && game.playerBets.getOrDefault(pId, 0L) > 0) {
+                            fallbackEligible.add(pId);
+                        }
+                    }
+
+                    if (!fallbackEligible.isEmpty()) {
+                        List<Long> winners = findBestHandWinners(game, fallbackEligible);
+                        splitAmount(winnings, winners, potSlice);
+                        distributed += potSlice;
                     }
                 } else {
                     List<Long> winners = findBestHandWinners(game, eligible);
