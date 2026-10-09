@@ -21,8 +21,8 @@ import java.util.concurrent.*;
 
 public class CasinoBot extends TelegramLongPollingBot {
 
-    private static final String TOKEN = System.getenv("BOT_TOKEN") != null ? 
-            System.getenv("BOT_TOKEN") : "8846203742:AAH6phjqvFPTDd6Y6xakWSu5RY7t5DiJjTA";
+    // Token bot được đặt trực tiếp trong source theo yêu cầu.
+    private static final String TOKEN = "8846203742:AAH6phjqvFPTDd6Y6xakWSu5RY7t5DiJjTA";
 
     private static final Set<Long> ADMIN_IDS = Set.of(7964831905L, 7432218242L);
     private final long botStartupTime = System.currentTimeMillis() / 1000L;
@@ -182,6 +182,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         Set<Long> allInPlayers = ConcurrentHashMap.newKeySet();
         
         long turnStartTime = 0;
+        long turnVersion = 0; // Chống timer cũ xử lý nhầm lượt mới
         ScheduledFuture<?> turnCountdown = null;
         Set<Long> actedInCurrentRound = ConcurrentHashMap.newKeySet();
     }
@@ -718,8 +719,15 @@ public class CasinoBot extends TelegramLongPollingBot {
             });
         } catch (Exception ignored) {}
 
-        if (game.turnCountdown != null) game.turnCountdown.cancel(true);
-        game.turnCountdown = scheduler.scheduleAtFixedRate(() -> updateBaiCaoTurnTimer(chatId), 5, 5, TimeUnit.SECONDS);
+        if (game.turnCountdown != null) game.turnCountdown.cancel(false);
+        final long expectedTurnVersion;
+        synchronized (game) {
+            game.turnVersion++;
+            expectedTurnVersion = game.turnVersion;
+        }
+        game.turnCountdown = scheduler.scheduleAtFixedRate(
+                () -> updateBaiCaoTurnTimer(chatId, expectedTurnVersion),
+                5, 5, TimeUnit.SECONDS);
     }
 
     private String getBaiCaoPlayingText(BaiCaoGame game, int remainingSeconds) {
@@ -781,20 +789,31 @@ public class CasinoBot extends TelegramLongPollingBot {
         telegramExecutor.execute(() -> { try { execute(edit); } catch (Exception ignored) {} });
     }
 
-    private void updateBaiCaoTurnTimer(long chatId) {
+    private void updateBaiCaoTurnTimer(long chatId, long expectedTurnVersion) {
         BaiCaoGame game = baicaoGames.get(chatId);
         if (game == null || !game.playing || game.messageId == null) return;
 
-        long elapsed = (System.currentTimeMillis() - game.turnStartTime) / 1000;
-        int remaining = (int) (50 - elapsed);
+        final int remaining;
+        final long timeoutUserId;
+        synchronized (game) {
+            // Timer của lượt trước có thể đã chạy dù đã cancel; bỏ qua nếu lượt đổi.
+            if (baicaoGames.get(chatId) != game || !game.playing
+                    || game.turnVersion != expectedTurnVersion
+                    || game.currentTurnIndex < 0
+                    || game.currentTurnIndex >= game.playerOrder.size()) return;
 
-        if (remaining <= 0) {
-            if (game.turnCountdown != null) game.turnCountdown.cancel(true);
-            long timeoutUserId = game.playerOrder.get(game.currentTurnIndex);
-            handleBaiCaoTimeout(chatId, timeoutUserId);
-            return;
+            long elapsed = (System.currentTimeMillis() - game.turnStartTime) / 1000;
+            remaining = (int) (50 - elapsed);
+            timeoutUserId = game.playerOrder.get(game.currentTurnIndex);
+            if (remaining <= 0) {
+                if (game.turnCountdown != null) game.turnCountdown.cancel(false);
+            }
         }
 
+        if (remaining <= 0) {
+            handleBaiCaoTimeout(chatId, timeoutUserId, expectedTurnVersion);
+            return;
+        }
         updateBaiCaoPlayingMessage(chatId, remaining);
     }
 
@@ -1048,26 +1067,32 @@ public class CasinoBot extends TelegramLongPollingBot {
         return p + "%";
     }
 
-    private void handleBaiCaoTimeout(long chatId, long userId) {
+    private void handleBaiCaoTimeout(long chatId, long userId, long expectedTurnVersion) {
         BaiCaoGame game = baicaoGames.get(chatId);
-        if (game == null || !game.playing) return;
+        if (game == null) return;
 
-        long currentUserId = game.playerOrder.get(game.currentTurnIndex);
-        if (currentUserId == userId) {
+        synchronized (game) {
+            // Xác minh lại trong cùng khóa với thao tác cược để tránh úp bài nhầm
+            // khi người chơi vừa bấm nút đúng lúc timer hết hạn.
+            if (baicaoGames.get(chatId) != game || !game.playing
+                    || game.turnVersion != expectedTurnVersion
+                    || game.currentTurnIndex < 0
+                    || game.currentTurnIndex >= game.playerOrder.size()
+                    || game.playerOrder.get(game.currentTurnIndex) != userId
+                    || System.currentTimeMillis() - game.turnStartTime < 50_000L) return;
+
             game.folded.add(userId);
+            game.actedInCurrentRound.remove(userId);
+            System.out.println("[BAICAO] Timeout lượt userId=" + userId + ", version=" + expectedTurnVersion);
             sendMessage(chatId, "⏰ <b>Quá 50 giây không thao tác, người chơi " + getMention(userId, game.players.get(userId)) + " đã tự động úp bài!</b>");
-            
-            List<Long> activePlayers = new ArrayList<>();
-            for (long pId : game.playerOrder) {
-                if (!game.folded.contains(pId)) activePlayers.add(pId);
-            }
+
+            List<Long> activePlayers = getActiveBaiCaoPlayers(game);
             if (activePlayers.size() <= 1) {
-                if (game.turnCountdown != null) game.turnCountdown.cancel(true);
+                if (game.turnCountdown != null) game.turnCountdown.cancel(false);
                 if (game.lastTagMessageId != null) deleteMessage(chatId, game.lastTagMessageId);
                 endBaiCaoGame(chatId, activePlayers);
                 return;
             }
-
             advanceBaiCaoTurn(chatId);
         }
     }
