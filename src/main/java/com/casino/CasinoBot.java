@@ -773,14 +773,18 @@ public class CasinoBot extends TelegramLongPollingBot {
         sb.append("\n<i>Đang xóc đĩa và mở bát... Vui lòng đợi!</i>");
         sendMessageSync(chatId, sb.toString());
 
-        new Thread(() -> {
+        // Dùng executor dùng chung thay vì tạo Thread mới cho từng ván.
+        // Giữ khoảng chờ ngắn để người chơi thấy thông báo xóc bát trước khi có kết quả.
+        telegramExecutor.execute(() -> {
             try {
-                Thread.sleep(2000);
+                Thread.sleep(900);
                 settleBauCuaGame(chatId, null);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             } catch (Exception e) {
-                e.printStackTrace();
+                System.err.println("[BAUCUA] Lỗi kết thúc ván: " + e.getMessage());
             }
-        }).start();
+        });
     }
 
     private void settleBauCuaGame(long chatId, Integer oldMessageId) {
@@ -891,9 +895,10 @@ public class CasinoBot extends TelegramLongPollingBot {
 
     private byte[] generateBauCuaGif(int[] results) throws Exception {
         // Kết quả được truyền vào từ settleBauCuaGame, nên GIF và thanh toán dùng cùng một kết quả.
-        final int width = 360;
-        final int height = 220;
-        final int totalFrames = 18;
+        // GIF nhẹ hơn: kích thước nhỏ, ít khung hình, giảm thời gian mã hóa và tải lên Telegram.
+        final int width = 320;
+        final int height = 196;
+        final int totalFrames = 12;
         ByteArrayOutputStream bao = new ByteArrayOutputStream();
         ImageWriter writer = ImageIO.getImageWritersBySuffix("gif").next();
 
@@ -902,7 +907,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             writer.prepareWriteSequence(null);
 
             for (int frame = 0; frame < totalFrames; frame++) {
-                BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+                BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_BYTE_INDEXED);
                 Graphics2D g = image.createGraphics();
                 g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                 g.setColor(new Color(105, 12, 20));
@@ -913,33 +918,33 @@ public class CasinoBot extends TelegramLongPollingBot {
 
                 // Bàn và ba viên xúc xắc luôn được vẽ trước; bát phủ lên trên chúng.
                 g.setColor(new Color(25, 105, 57));
-                g.fillRoundRect(35, 45, 290, 135, 28, 28);
+                g.fillRoundRect(30, 38, 260, 120, 28, 28);
                 g.setColor(new Color(230, 184, 65));
                 g.setStroke(new BasicStroke(3));
-                g.drawRoundRect(35, 45, 290, 135, 28, 28);
+                g.drawRoundRect(30, 38, 260, 120, 28, 28);
 
                 String[] labels = {BAUCUA_FACES[results[0]], BAUCUA_FACES[results[1]], BAUCUA_FACES[results[2]]};
                 String[] icons = {BAUCUA_ICONS[results[0]], BAUCUA_ICONS[results[1]], BAUCUA_ICONS[results[2]]};
-                int[] xs = {67, 157, 247};
+                int[] xs = {57, 137, 217};
                 for (int i = 0; i < 3; i++) {
                     g.setColor(Color.WHITE);
-                    g.fillRoundRect(xs[i], 77, 46, 55, 10, 10);
+                    g.fillRoundRect(xs[i], 68, 44, 52, 10, 10);
                     g.setColor(new Color(40, 40, 40));
-                    g.drawRoundRect(xs[i], 77, 46, 55, 10, 10);
-                    g.setFont(new Font("SansSerif", Font.BOLD, 25));
-                    g.drawString(icons[i], xs[i] + 7, 111);
-                    g.setFont(new Font("SansSerif", Font.BOLD, 12));
-                    g.drawString(labels[i], xs[i] - 1, 151);
+                    g.drawRoundRect(xs[i], 68, 44, 52, 10, 10);
+                    g.setFont(new Font("SansSerif", Font.BOLD, 23));
+                    g.drawString(icons[i], xs[i] + 6, 101);
+                    g.setFont(new Font("SansSerif", Font.BOLD, 11));
+                    g.drawString(labels[i], xs[i] - 1, 139);
                 }
 
                 // Bát úp kín xúc xắc ở đầu GIF, sau đó nghiêng và trượt sang phải,
                 // lần lượt để lộ các viên từ trái qua phải.
                 double progress = frame / (double) (totalFrames - 1);
-                int bowlX = (int) (28 + progress * 365);
+                int bowlX = (int) (22 + progress * 330);
                 if (frame < totalFrames - 1) {
                     int lift = (int) (progress * 34);
-                    int bowlY = 42 - (int) (Math.sin(progress * Math.PI) * 7) - lift / 3;
-                    int bw = 282, bh = 112;
+                    int bowlY = 35 - (int) (Math.sin(progress * Math.PI) * 6) - lift / 3;
+                    int bw = 248, bh = 98;
                     java.awt.geom.AffineTransform oldTransform = g.getTransform();
                     double tilt = -Math.toRadians(2 + progress * 18);
                     g.rotate(tilt, bowlX + bw / 2.0, bowlY + bh / 2.0);
@@ -956,12 +961,12 @@ public class CasinoBot extends TelegramLongPollingBot {
                     g.drawArc(bowlX + 12, bowlY + 9, bw - 24, bh - 24, 190, 160);
                     g.setColor(Color.WHITE);
                     g.setFont(new Font("SansSerif", Font.BOLD, 17));
-                    g.drawString("BAU CUA", Math.max(8, Math.min(width - 95, bowlX + 92)), bowlY + 62);
+                    g.drawString("BAU CUA", Math.max(8, Math.min(width - 90, bowlX + 78)), bowlY + 55);
                     g.setTransform(oldTransform);
                 } else {
                     g.setColor(new Color(255, 239, 180));
                     g.setFont(new Font("SansSerif", Font.BOLD, 18));
-                    g.drawString("KET QUA", 132, 202);
+                    g.drawString("KET QUA", 116, 183);
                 }
                 g.dispose();
 
@@ -978,7 +983,7 @@ public class CasinoBot extends TelegramLongPollingBot {
                     gce.setAttribute("disposalMethod", "none");
                     gce.setAttribute("userInputFlag", "FALSE");
                     gce.setAttribute("transparentColorFlag", "FALSE");
-                    gce.setAttribute("delayTime", "12"); // 120 ms/frame
+                    gce.setAttribute("delayTime", "8"); // 80 ms/frame; tổng hoạt ảnh ngắn hơn
                     gce.setAttribute("transparentColorIndex", "0");
                 }
                 metadata.setFromTree(format, root);
