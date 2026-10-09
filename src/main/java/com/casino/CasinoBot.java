@@ -892,7 +892,7 @@ public class CasinoBot extends TelegramLongPollingBot {
     private byte[] generateBauCuaGif(int[] results) throws Exception {
         final int width = 320;
         final int height = 200;
-        final int totalFrames = 8; // Khớp chuẩn 8 trạng thái trong ảnh mẫu của bạn
+        final int totalFrames = 8; 
         ByteArrayOutputStream bao = new ByteArrayOutputStream();
         ImageWriter writer = ImageIO.getImageWritersBySuffix("gif").next();
 
@@ -900,8 +900,16 @@ public class CasinoBot extends TelegramLongPollingBot {
             writer.setOutput(ios);
             writer.prepareWriteSequence(null);
 
-            String[] labels = {BAUCUA_FACES[results[0]], BAUCUA_FACES[results[1]], BAUCUA_FACES[results[2]]};
-            String[] icons = {BAUCUA_ICONS[results[0]], BAUCUA_ICONS[results[1]], BAUCUA_ICONS[results[2]]};
+            String[] shortLabels = {"BẦU", "CUA", "TÔM", "CÁ", "GÀ", "NAI"};
+            Color[] diceColors = {
+                new Color(220, 50, 50),   // Bầu - Đỏ
+                new Color(40, 140, 220),  // Cua - Xanh dương
+                new Color(230, 130, 20),  // Tôm - Cam
+                new Color(40, 180, 80),   // Cá - Xanh lá
+                new Color(200, 180, 30),  // Gà - Vàng
+                new Color(140, 80, 40)    // Nai - Nâu
+            };
+
             int[] diceX = {70, 138, 206};
 
             for (int frame = 0; frame < totalFrames; frame++) {
@@ -909,7 +917,7 @@ public class CasinoBot extends TelegramLongPollingBot {
                 Graphics2D g = image.createGraphics();
                 g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-                // 1. Nền mâm xoay đỏ sẫm sang trọng phong cách hoàng gia
+                // 1. Nền mâm xoay đỏ sẫm sang trọng
                 g.setColor(new Color(110, 10, 15));
                 g.fillRect(0, 0, width, height);
                 g.setColor(new Color(230, 184, 65));
@@ -924,23 +932,28 @@ public class CasinoBot extends TelegramLongPollingBot {
 
                 // 2. Vẽ 3 viên xúc xắc ở giữa mâm (hé lộ dần qua từng khung hình mở bát)
                 for (int i = 0; i < 3; i++) {
-                    // Frame 0: Úp bát hoàn toàn -> Che kín xúc xắc
-                    // Frame 1: Bắt đầu mở -> Hé lộ viên 1
-                    // Frame 2: Lộ viên thứ 1
-                    // Frame 3: Lộ viên thứ 2
-                    // Frame 4: Lộ viên thứ 3
-                    // Frame 5 -> 7: Mở hoàn toàn và hiển thị kết quả
                     if (frame >= i + 1 || frame >= 5) {
-                        g.setColor(new Color(250, 245, 230));
+                        int faceIdx = results[i];
+                        
+                        g.setColor(new Color(253, 248, 235));
                         g.fillRoundRect(diceX[i], 72, 44, 44, 8, 8);
                         g.setColor(new Color(180, 140, 50));
+                        g.setStroke(new BasicStroke(2));
                         g.drawRoundRect(diceX[i], 72, 44, 44, 8, 8);
-                        g.setFont(new Font("SansSerif", Font.BOLD, 22));
-                        g.drawString(icons[i], diceX[i] + 10, 72 + 29);
+
+                        g.setColor(diceColors[faceIdx]);
+                        g.fillRoundRect(diceX[i] + 7, 79, 30, 16, 4, 4);
+
+                        g.setFont(new Font("SansSerif", Font.BOLD, 11));
+                        g.setColor(Color.WHITE);
+                        FontMetrics fm = g.getFontMetrics();
+                        String txt = shortLabels[faceIdx];
+                        int strWidth = fm.stringWidth(txt);
+                        g.drawString(txt, diceX[i] + 22 - strWidth / 2, 92);
                     }
                 }
 
-                // 3. Hiệu ứng chiếc bát sứ đen viền vàng dịch chuyển và nhấc lên qua từng khung hình (0 đến 7)
+                // 3. Hiệu ứng chiếc bát sứ đen viền vàng dịch chuyển và nhấc lên
                 if (frame < 6) {
                     int bowlX = 35 + (int) (frame * 32.0);
                     int bowlY = 40 - (int) (frame * 4.5);
@@ -966,7 +979,7 @@ public class CasinoBot extends TelegramLongPollingBot {
                     g.setTransform(oldTransform);
                 }
 
-                // 4. Khung số 7 và 8: Hiển thị bảng công bố kết quả bên dưới giống hệt ảnh mẫu
+                // 4. Bảng công bố kết quả ở cuối GIF
                 if (frame >= 6) {
                     g.setColor(new Color(85, 12, 18, 230));
                     g.fillRoundRect(24, 132, width - 48, 58, 8, 8);
@@ -980,7 +993,10 @@ public class CasinoBot extends TelegramLongPollingBot {
 
                     g.setFont(new Font("SansSerif", Font.BOLD, 13));
                     g.setColor(Color.YELLOW);
-                    g.drawString(icons[0] + " " + labels[0] + "  |  " + icons[1] + " " + labels[1] + "  |  " + icons[2] + " " + labels[2], 56, 175);
+                    String resText = BAUCUA_ICONS[results[0]] + " " + BAUCUA_FACES[results[0]] + "  |  " +
+                                     BAUCUA_ICONS[results[1]] + " " + BAUCUA_FACES[results[1]] + "  |  " +
+                                     BAUCUA_ICONS[results[2]] + " " + BAUCUA_FACES[results[2]];
+                    g.drawString(resText, 52, 175);
                 }
 
                 g.dispose();
@@ -998,7 +1014,7 @@ public class CasinoBot extends TelegramLongPollingBot {
                     gce.setAttribute("disposalMethod", "none");
                     gce.setAttribute("userInputFlag", "FALSE");
                     gce.setAttribute("transparentColorFlag", "FALSE");
-                    gce.setAttribute("delayTime", "12"); // Tốc độ chạy mượt mà giữa các khung hình
+                    gce.setAttribute("delayTime", "12");
                     gce.setAttribute("transparentColorIndex", "0");
                 }
                 metadata.setFromTree(format, root);
