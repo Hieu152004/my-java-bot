@@ -30,7 +30,7 @@ public class CasinoBot extends TelegramLongPollingBot {
     private static final long[] BET_AMOUNTS = {
             500_000_000L, 1_000_000_000L, 2_000_000_000L, 5_000_000_000L,
             7_000_000_000L, 10_000_000_000L, 15_000_000_000L,
-            20_000_000_000L, 50_000_000_000L
+            20_000_000_000L, 50_000_000_000L, 100_000_000_000L, 300_000_000_000L
     };
 
     private static final long[] BAICAO_BET_OPTIONS = {
