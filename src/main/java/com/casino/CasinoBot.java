@@ -568,17 +568,14 @@ public class CasinoBot extends TelegramLongPollingBot {
 
     private InlineKeyboardMarkup getBauCuaBettingKeyboard() {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
-        // 3 hàng tương ứng 3 mức cược: 1B, 10B, 50B
-        for (long amt : BAUCUA_BET_AMOUNTS) {
-            String shortAmt = formatShortMoney(amt);
-            rows.add(List.of(
-                    createBtn("🎃 " + shortAmt, "bcua_bet:0:" + amt),
-                    createBtn("🦀 " + shortAmt, "bcua_bet:1:" + amt),
-                    createBtn("🦐 " + shortAmt, "bcua_bet:2:" + amt),
-                    createBtn("🐟 " + shortAmt, "bcua_bet:3:" + amt),
-                    createBtn("🐓 " + shortAmt, "bcua_bet:4:" + amt),
-                    createBtn("🦌 " + shortAmt, "bcua_bet:5:" + amt)
-            ));
+        // Hiển thị 6 hàng theo từng cửa; mỗi hàng có 3 mức cược để Telegram không rút gọn thành "...".
+        String[] faces = {"🎃 Bầu", "🦀 Cua", "🦐 Tôm", "🐟 Cá", "🐓 Gà", "🦌 Nai"};
+        for (int face = 0; face < BAUCUA_ICONS.length; face++) {
+            List<InlineKeyboardButton> row = new ArrayList<>();
+            for (long amt : BAUCUA_BET_AMOUNTS) {
+                row.add(createBtn(faces[face] + " " + formatShortMoney(amt), "bcua_bet:" + face + ":" + amt));
+            }
+            rows.add(row);
         }
         rows.add(List.of(createBtn("🏺 MỞ BÁT BẦU CUA", "bcua_roll")));
         return new InlineKeyboardMarkup(rows);
@@ -935,22 +932,32 @@ public class CasinoBot extends TelegramLongPollingBot {
                     g.drawString(labels[i], xs[i] - 1, 151);
                 }
 
-                // Bát trượt dần từ trái sang phải, để lộ từng viên xúc xắc theo thứ tự.
-                // Những frame đầu bát phủ kín cả ba viên; frame cuối bát đã ra khỏi bàn.
+                // Bát úp kín xúc xắc ở đầu GIF, sau đó nghiêng và trượt sang phải,
+                // lần lượt để lộ các viên từ trái qua phải.
                 double progress = frame / (double) (totalFrames - 1);
-                int bowlX = (int) (30 + progress * 350);
+                int bowlX = (int) (28 + progress * 365);
                 if (frame < totalFrames - 1) {
-                    int bowlY = 48 - (int) (Math.sin(progress * Math.PI) * 9);
-                    g.setColor(new Color(55, 55, 62));
-                    g.fillRoundRect(bowlX, bowlY, 300, 105, 75, 75);
-                    g.setColor(new Color(230, 184, 65));
-                    g.setStroke(new BasicStroke(4));
-                    g.drawRoundRect(bowlX, bowlY, 300, 105, 75, 75);
-                    g.setColor(new Color(35, 35, 40));
-                    g.fillRoundRect(bowlX + 18, bowlY + 12, 264, 78, 65, 65);
+                    int lift = (int) (progress * 34);
+                    int bowlY = 42 - (int) (Math.sin(progress * Math.PI) * 7) - lift / 3;
+                    int bw = 282, bh = 112;
+                    java.awt.geom.AffineTransform oldTransform = g.getTransform();
+                    double tilt = -Math.toRadians(2 + progress * 18);
+                    g.rotate(tilt, bowlX + bw / 2.0, bowlY + bh / 2.0);
+                    // Thân bát dạng vòm, có vành sáng và lòng bát tối tạo cảm giác bát thật.
+                    g.setColor(new Color(38, 39, 45));
+                    g.fillOval(bowlX, bowlY, bw, bh);
+                    g.setColor(new Color(185, 190, 198));
+                    g.setStroke(new BasicStroke(5));
+                    g.drawOval(bowlX, bowlY, bw, bh);
+                    g.setColor(new Color(75, 78, 86));
+                    g.fillOval(bowlX + 10, bowlY + 9, bw - 20, bh - 23);
+                    g.setColor(new Color(225, 185, 75));
+                    g.setStroke(new BasicStroke(3));
+                    g.drawArc(bowlX + 12, bowlY + 9, bw - 24, bh - 24, 190, 160);
                     g.setColor(Color.WHITE);
-                    g.setFont(new Font("SansSerif", Font.BOLD, 16));
-                    g.drawString("BAU CUA", Math.max(8, Math.min(width - 100, bowlX + 80)), bowlY + 57);
+                    g.setFont(new Font("SansSerif", Font.BOLD, 17));
+                    g.drawString("BAU CUA", Math.max(8, Math.min(width - 95, bowlX + 92)), bowlY + 62);
+                    g.setTransform(oldTransform);
                 } else {
                     g.setColor(new Color(255, 239, 180));
                     g.setFont(new Font("SansSerif", Font.BOLD, 18));
