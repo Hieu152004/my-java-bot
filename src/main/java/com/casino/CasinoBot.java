@@ -1773,6 +1773,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             game.playing = false;
 
             Map<Long, Long> winnings = new HashMap<>();
+            long returnedUncalled = 0L;
             // Hoàn phần cược chưa được ai theo: nếu chỉ một người có mức cược cao nhất,
             // phần vượt quá mức cược cao thứ hai không thuộc hũ và phải trả lại.
             long maxContribution = 0L;
@@ -1807,7 +1808,6 @@ public class CasinoBot extends TelegramLongPollingBot {
 
             long previousTier = 0;
             long distributed = 0;
-            long returnedUncalled = 0;
 
             List<Long> tiers = new ArrayList<>();
             for (long pId : contributors) {
