@@ -533,6 +533,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             for (List<BauCuaBet> list : game.bets.values()) {
                 totalBetsCount += list.size();
             }
+            // Nếu hết 45s mà không có ai đặt cược hoặc cái không bấm, hủy ván và hoàn tiền
             if (totalBetsCount == 0 || game.dealerId == null) {
                 BauCuaGame removed = baucuaGames.remove(chatId);
                 if (removed != null) {
@@ -567,6 +568,7 @@ public class CasinoBot extends TelegramLongPollingBot {
 
     private InlineKeyboardMarkup getBauCuaBettingKeyboard() {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        // Hiển thị 6 hàng theo từng cửa; mỗi hàng có 3 mức cược để Telegram không rút gọn thành "...".
         String[] faces = {"🎃 Bầu", "🦀 Cua", "🦐 Tôm", "🐟 Cá", "🐓 Gà", "🦌 Nai"};
         for (int face = 0; face < BAUCUA_ICONS.length; face++) {
             List<InlineKeyboardButton> row = new ArrayList<>();
@@ -771,16 +773,14 @@ public class CasinoBot extends TelegramLongPollingBot {
         sb.append("\n<i>Đang xóc đĩa và mở bát... Vui lòng đợi!</i>");
         sendMessageSync(chatId, sb.toString());
 
-        telegramExecutor.execute(() -> {
+        new Thread(() -> {
             try {
-                Thread.sleep(900);
+                Thread.sleep(2000);
                 settleBauCuaGame(chatId, null);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
             } catch (Exception e) {
-                System.err.println("[BAUCUA] Lỗi kết thúc ván: " + e.getMessage());
+                e.printStackTrace();
             }
-        });
+        }).start();
     }
 
     private void settleBauCuaGame(long chatId, Integer oldMessageId) {
@@ -890,9 +890,10 @@ public class CasinoBot extends TelegramLongPollingBot {
     }
 
     private byte[] generateBauCuaGif(int[] results) throws Exception {
-        final int width = 320;
-        final int height = 200;
-        final int totalFrames = 8; 
+        // Kết quả được truyền vào từ settleBauCuaGame, nên GIF và thanh toán dùng cùng một kết quả.
+        final int width = 360;
+        final int height = 220;
+        final int totalFrames = 18;
         ByteArrayOutputStream bao = new ByteArrayOutputStream();
         ImageWriter writer = ImageIO.getImageWritersBySuffix("gif").next();
 
@@ -900,105 +901,68 @@ public class CasinoBot extends TelegramLongPollingBot {
             writer.setOutput(ios);
             writer.prepareWriteSequence(null);
 
-            String[] shortLabels = {"BẦU", "CUA", "TÔM", "CÁ", "GÀ", "NAI"};
-            Color[] diceColors = {
-                new Color(220, 50, 50),   // Bầu - Đỏ
-                new Color(40, 140, 220),  // Cua - Xanh dương
-                new Color(230, 130, 20),  // Tôm - Cam
-                new Color(40, 180, 80),   // Cá - Xanh lá
-                new Color(200, 180, 30),  // Gà - Vàng
-                new Color(140, 80, 40)    // Nai - Nâu
-            };
-
-            int[] diceX = {70, 138, 206};
-
             for (int frame = 0; frame < totalFrames; frame++) {
                 BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
                 Graphics2D g = image.createGraphics();
                 g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-
-                // 1. Nền mâm xoay đỏ sẫm sang trọng
-                g.setColor(new Color(110, 10, 15));
+                g.setColor(new Color(105, 12, 20));
                 g.fillRect(0, 0, width, height);
                 g.setColor(new Color(230, 184, 65));
+                g.setStroke(new BasicStroke(4));
+                g.drawRoundRect(5, 5, width - 10, height - 10, 18, 18);
+
+                // Bàn và ba viên xúc xắc luôn được vẽ trước; bát phủ lên trên chúng.
+                g.setColor(new Color(25, 105, 57));
+                g.fillRoundRect(35, 45, 290, 135, 28, 28);
+                g.setColor(new Color(230, 184, 65));
                 g.setStroke(new BasicStroke(3));
-                g.drawRect(5, 5, width - 10, height - 10);
+                g.drawRoundRect(35, 45, 290, 135, 28, 28);
 
-                // Mâm cỗ đỏ tươi bên trong
-                g.setColor(new Color(150, 18, 25));
-                g.fillRoundRect(15, 15, width - 30, height - 30, 16, 16);
-                g.setColor(new Color(240, 200, 80));
-                g.drawRoundRect(15, 15, width - 30, height - 30, 16, 16);
-
-                // 2. Vẽ 3 viên xúc xắc ở giữa mâm (hé lộ dần qua từng khung hình mở bát)
+                String[] labels = {BAUCUA_FACES[results[0]], BAUCUA_FACES[results[1]], BAUCUA_FACES[results[2]]};
+                String[] icons = {BAUCUA_ICONS[results[0]], BAUCUA_ICONS[results[1]], BAUCUA_ICONS[results[2]]};
+                int[] xs = {67, 157, 247};
                 for (int i = 0; i < 3; i++) {
-                    if (frame >= i + 1 || frame >= 5) {
-                        int faceIdx = results[i];
-                        
-                        g.setColor(new Color(253, 248, 235));
-                        g.fillRoundRect(diceX[i], 72, 44, 44, 8, 8);
-                        g.setColor(new Color(180, 140, 50));
-                        g.setStroke(new BasicStroke(2));
-                        g.drawRoundRect(diceX[i], 72, 44, 44, 8, 8);
-
-                        g.setColor(diceColors[faceIdx]);
-                        g.fillRoundRect(diceX[i] + 7, 79, 30, 16, 4, 4);
-
-                        g.setFont(new Font("SansSerif", Font.BOLD, 11));
-                        g.setColor(Color.WHITE);
-                        FontMetrics fm = g.getFontMetrics();
-                        String txt = shortLabels[faceIdx];
-                        int strWidth = fm.stringWidth(txt);
-                        g.drawString(txt, diceX[i] + 22 - strWidth / 2, 92);
-                    }
-                }
-
-                // 3. Hiệu ứng chiếc bát sứ đen viền vàng dịch chuyển và nhấc lên
-                if (frame < 6) {
-                    int bowlX = 35 + (int) (frame * 32.0);
-                    int bowlY = 40 - (int) (frame * 4.5);
-                    int bw = 230, bh = 100;
-
-                    java.awt.geom.AffineTransform oldTransform = g.getTransform();
-                    if (frame > 0) {
-                        g.rotate(Math.toRadians(frame * 6.5), bowlX + bw / 2.0, bowlY + bh / 2.0);
-                    }
-
-                    // Thân bát
-                    g.setColor(new Color(35, 35, 40));
-                    g.fillArc(bowlX, bowlY, bw, bh, 0, 180);
-                    g.setColor(new Color(220, 180, 70));
-                    g.setStroke(new BasicStroke(3));
-                    g.drawArc(bowlX, bowlY, bw, bh, 0, 180);
-                    // Vành đáy bát
-                    g.setColor(new Color(55, 55, 60));
-                    g.fillOval(bowlX + 65, bowlY + bh - 12, 100, 16);
-                    g.setColor(new Color(220, 180, 70));
-                    g.drawOval(bowlX + 65, bowlY + bh - 12, 100, 16);
-
-                    g.setTransform(oldTransform);
-                }
-
-                // 4. Bảng công bố kết quả ở cuối GIF
-                if (frame >= 6) {
-                    g.setColor(new Color(85, 12, 18, 230));
-                    g.fillRoundRect(24, 132, width - 48, 58, 8, 8);
-                    g.setColor(new Color(230, 184, 65));
-                    g.setStroke(new BasicStroke(2));
-                    g.drawRoundRect(24, 132, width - 48, 58, 8, 8);
-
-                    g.setFont(new Font("SansSerif", Font.BOLD, 12));
                     g.setColor(Color.WHITE);
-                    g.drawString("KẾT QUẢ BẦU CUA", 108, 148);
-
-                    g.setFont(new Font("SansSerif", Font.BOLD, 13));
-                    g.setColor(Color.YELLOW);
-                    String resText = BAUCUA_ICONS[results[0]] + " " + BAUCUA_FACES[results[0]] + "  |  " +
-                                     BAUCUA_ICONS[results[1]] + " " + BAUCUA_FACES[results[1]] + "  |  " +
-                                     BAUCUA_ICONS[results[2]] + " " + BAUCUA_FACES[results[2]];
-                    g.drawString(resText, 52, 175);
+                    g.fillRoundRect(xs[i], 77, 46, 55, 10, 10);
+                    g.setColor(new Color(40, 40, 40));
+                    g.drawRoundRect(xs[i], 77, 46, 55, 10, 10);
+                    g.setFont(new Font("SansSerif", Font.BOLD, 25));
+                    g.drawString(icons[i], xs[i] + 7, 111);
+                    g.setFont(new Font("SansSerif", Font.BOLD, 12));
+                    g.drawString(labels[i], xs[i] - 1, 151);
                 }
 
+                // Bát úp kín xúc xắc ở đầu GIF, sau đó nghiêng và trượt sang phải,
+                // lần lượt để lộ các viên từ trái qua phải.
+                double progress = frame / (double) (totalFrames - 1);
+                int bowlX = (int) (28 + progress * 365);
+                if (frame < totalFrames - 1) {
+                    int lift = (int) (progress * 34);
+                    int bowlY = 42 - (int) (Math.sin(progress * Math.PI) * 7) - lift / 3;
+                    int bw = 282, bh = 112;
+                    java.awt.geom.AffineTransform oldTransform = g.getTransform();
+                    double tilt = -Math.toRadians(2 + progress * 18);
+                    g.rotate(tilt, bowlX + bw / 2.0, bowlY + bh / 2.0);
+                    // Thân bát dạng vòm, có vành sáng và lòng bát tối tạo cảm giác bát thật.
+                    g.setColor(new Color(38, 39, 45));
+                    g.fillOval(bowlX, bowlY, bw, bh);
+                    g.setColor(new Color(185, 190, 198));
+                    g.setStroke(new BasicStroke(5));
+                    g.drawOval(bowlX, bowlY, bw, bh);
+                    g.setColor(new Color(75, 78, 86));
+                    g.fillOval(bowlX + 10, bowlY + 9, bw - 20, bh - 23);
+                    g.setColor(new Color(225, 185, 75));
+                    g.setStroke(new BasicStroke(3));
+                    g.drawArc(bowlX + 12, bowlY + 9, bw - 24, bh - 24, 190, 160);
+                    g.setColor(Color.WHITE);
+                    g.setFont(new Font("SansSerif", Font.BOLD, 17));
+                    g.drawString("BAU CUA", Math.max(8, Math.min(width - 95, bowlX + 92)), bowlY + 62);
+                    g.setTransform(oldTransform);
+                } else {
+                    g.setColor(new Color(255, 239, 180));
+                    g.setFont(new Font("SansSerif", Font.BOLD, 18));
+                    g.drawString("KET QUA", 132, 202);
+                }
                 g.dispose();
 
                 javax.imageio.metadata.IIOMetadata metadata = writer.getDefaultImageMetadata(
@@ -1014,7 +978,7 @@ public class CasinoBot extends TelegramLongPollingBot {
                     gce.setAttribute("disposalMethod", "none");
                     gce.setAttribute("userInputFlag", "FALSE");
                     gce.setAttribute("transparentColorFlag", "FALSE");
-                    gce.setAttribute("delayTime", "12");
+                    gce.setAttribute("delayTime", "12"); // 120 ms/frame
                     gce.setAttribute("transparentColorIndex", "0");
                 }
                 metadata.setFromTree(format, root);
@@ -1446,7 +1410,29 @@ public class CasinoBot extends TelegramLongPollingBot {
         edit.setParseMode("HTML");
         edit.setReplyMarkup(getBaiCaoPlayingKeyboard(game));
 
-        telegramExecutor.execute(() -> { try { execute(edit); } catch (Exception ignored) {} });
+        telegramExecutor.execute(() -> {
+            try {
+                execute(edit);
+            } catch (Exception e) {
+                System.err.println("[BAICAO] Không cập nhật được bàn chơi, sẽ thử gửi lại: " + e.getMessage());
+                scheduler.schedule(() -> {
+                    BaiCaoGame current = baicaoGames.get(chatId);
+                    if (current == game && current.playing && current.messageId != null) {
+                        try {
+                            EditMessageText retry = new EditMessageText();
+                            retry.setChatId(String.valueOf(chatId));
+                            retry.setMessageId(current.messageId);
+                            retry.setText(getBaiCaoPlayingText(current, 30));
+                            retry.setParseMode("HTML");
+                            retry.setReplyMarkup(getBaiCaoPlayingKeyboard(current));
+                            execute(retry);
+                        } catch (Exception retryError) {
+                            System.err.println("[BAICAO] Gửi lại bàn chơi thất bại: " + retryError.getMessage());
+                        }
+                    }
+                }, 1, TimeUnit.SECONDS);
+            }
+        });
     }
 
     private void updateBaiCaoTurnTimer(long chatId, long expectedTurnVersion) {
@@ -1787,6 +1773,32 @@ public class CasinoBot extends TelegramLongPollingBot {
             game.playing = false;
 
             Map<Long, Long> winnings = new HashMap<>();
+            // Hoàn phần cược chưa được ai theo: nếu chỉ một người có mức cược cao nhất,
+            // phần vượt quá mức cược cao thứ hai không thuộc hũ và phải trả lại.
+            long maxContribution = 0L;
+            long secondContribution = 0L;
+            long maxContributorId = -1L;
+            int maxContributorCount = 0;
+            for (long pId : game.playerOrder) {
+                long contribution = game.playerBets.getOrDefault(pId, 0L);
+                if (contribution > maxContribution) {
+                    secondContribution = maxContribution;
+                    maxContribution = contribution;
+                    maxContributorId = pId;
+                    maxContributorCount = 1;
+                } else if (contribution == maxContribution && contribution > 0) {
+                    maxContributorCount++;
+                } else if (contribution > secondContribution) {
+                    secondContribution = contribution;
+                }
+            }
+            if (maxContributorCount == 1 && maxContributorId >= 0 && maxContribution > secondContribution) {
+                returnedUncalled = maxContribution - secondContribution;
+                game.playerBets.put(maxContributorId, secondContribution);
+                game.totalPot = Math.max(0L, game.totalPot - returnedUncalled);
+                Database.changeBalance(maxContributorId, returnedUncalled);
+            }
+
             List<Long> contributors = new ArrayList<>();
             for (long pId : game.playerOrder) {
                 if (game.playerBets.getOrDefault(pId, 0L) > 0) contributors.add(pId);
@@ -1861,8 +1873,24 @@ public class CasinoBot extends TelegramLongPollingBot {
                 if (entry.getValue() > 0) Database.changeBalance(entry.getKey(), entry.getValue());
             }
 
-            long absoluteWinnerId = activePlayers.isEmpty() ? game.playerOrder.get(0) : findBestHandWinners(game, activePlayers).get(0);
-            HandScore maxSc = evaluateHand(game.cards.get(absoluteWinnerId));
+            List<Long> showdownEligible = activePlayers == null ? new ArrayList<>() : new ArrayList<>(activePlayers);
+            if (showdownEligible.isEmpty()) {
+                for (long pId : game.playerOrder) {
+                    if (game.cards.containsKey(pId)) showdownEligible.add(pId);
+                }
+            }
+            if (showdownEligible.isEmpty()) {
+                // Không có dữ liệu bài hợp lệ: hoàn tiền cược đã ghi nhận, tránh giữ tiền khi ván lỗi.
+                for (Map.Entry<Long, Long> entry : game.playerBets.entrySet()) {
+                    long refund = entry.getValue();
+                    if (refund > 0) Database.changeBalance(entry.getKey(), refund);
+                }
+                baicaoGames.remove(chatId, game);
+                sendMessage(chatId, "⚠️ Ván Bài Tố bị lỗi dữ liệu; bot đã hoàn lại tiền cược đã ghi nhận.");
+                sendMainMenu(chatId);
+                return;
+            }
+            long absoluteWinnerId = findBestHandWinners(game, showdownEligible).get(0);
 
             StringBuilder winMsg = new StringBuilder();
             winMsg.append("🏆 <b>KẾT THÚC VÁN BÀI TỐ</b>\n\n");
@@ -2103,25 +2131,55 @@ public class CasinoBot extends TelegramLongPollingBot {
         sb.append("\n<i>Đang gieo xúc xắc... Vui lòng đợi!</i>");
         sendMessageSync(chatId, sb.toString());
 
-        new Thread(() -> {
+        // Luôn chốt ván kể cả khi Telegram lỗi khi gửi một trong ba viên.
+        // Nếu gửi viên nào thất bại, mô phỏng giá trị còn thiếu và thông báo rõ trong kết quả.
+        Thread rollThread = new Thread(() -> {
+            int total = 0;
+            int sentDice = 0;
+            boolean fallbackUsed = false;
+            Random random = new Random();
             try {
-                int total = 0;
                 for (int i = 0; i < 3; i++) {
-                    SendDice dice = new SendDice();
-                    dice.setChatId(String.valueOf(chatId));
-                    dice.setEmoji("🎲");
-                    Message m = execute(dice);
-                    total += m.getDice().getValue();
-                    Thread.sleep(1500);
+                    try {
+                        SendDice dice = new SendDice();
+                        dice.setChatId(String.valueOf(chatId));
+                        dice.setEmoji("🎲");
+                        Message m = execute(dice);
+                        if (m == null || m.getDice() == null) {
+                            throw new IllegalStateException("Telegram không trả dữ liệu xúc xắc");
+                        }
+                        total += m.getDice().getValue();
+                        sentDice++;
+                    } catch (Exception sendError) {
+                        fallbackUsed = true;
+                        // Bù đủ 3 giá trị để không giữ ván và tiền cược vô thời hạn.
+                        for (int missing = i; missing < 3; missing++) {
+                            total += random.nextInt(6) + 1;
+                        }
+                        break;
+                    }
+                    if (i < 2) Thread.sleep(900L);
                 }
-
-                String result = (total >= 11) ? "T" : "X";
-                settleGame(chatId, total, result, null);
-
-            } catch (Exception e) {
-                e.printStackTrace();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                fallbackUsed = true;
+                while (sentDice < 3) {
+                    total += random.nextInt(6) + 1;
+                    sentDice++;
+                }
+            } finally {
+                DiceGame current = games.get(chatId);
+                if (current == game && current.rolling) {
+                    String result = (total >= 11) ? "T" : "X";
+                    settleGame(chatId, total, result, null);
+                    if (fallbackUsed) {
+                        sendMessage(chatId, "⚠️ Telegram gửi xúc xắc không đầy đủ; bot đã tự hoàn tất ván để tránh kẹt tiền. Tổng điểm được chốt: " + total + ".");
+                    }
+                }
             }
-        }).start();
+        }, "dice-roll-" + chatId);
+        rollThread.setDaemon(true);
+        rollThread.start();
     }
 
     private void settleGame(long chatId, int total, String result, Integer oldMessageId) {
