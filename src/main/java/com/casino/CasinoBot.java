@@ -5,6 +5,7 @@ import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendAnimation;
 import org.telegram.telegrambots.meta.api.methods.send.SendDice;
+import org.telegram.telegrambots.meta.api.methods.groupadministration.PinChatMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.InputFile;
@@ -25,6 +26,11 @@ import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.util.*;
@@ -37,6 +43,22 @@ public class CasinoBot extends TelegramLongPollingBot {
     private static final String TOKEN = "8846203742:AAH6phjqvFPTDd6Y6xakWSu5RY7t5DiJjTA";
 
     private static final Set<Long> ADMIN_IDS = Set.of(7964831905L, 7432218242L);
+    // Nhóm đã tương tác với bot; được lưu vào file nếu môi trường cho phép.
+    private static final Set<Long> KNOWN_GROUP_IDS = ConcurrentHashMap.newKeySet();
+    private static final Path KNOWN_GROUPS_FILE = Paths.get("known_groups.txt");
+
+    static {
+        try {
+            if (Files.exists(KNOWN_GROUPS_FILE)) {
+                for (String line : Files.readAllLines(KNOWN_GROUPS_FILE, StandardCharsets.UTF_8)) {
+                    try { KNOWN_GROUP_IDS.add(Long.parseLong(line.trim())); }
+                    catch (NumberFormatException ignored) { }
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("[BROADCAST] Không đọc được danh sách nhóm đã biết: " + e.getMessage());
+        }
+    }
     private final long botStartupTime = System.currentTimeMillis() / 1000L;
 
     private static final long[] BET_AMOUNTS = {
@@ -278,6 +300,73 @@ public class CasinoBot extends TelegramLongPollingBot {
         }
     }
 
+    private void rememberGroupIfNeeded(Message message) {
+        if (message.getChat() == null || message.getChat().getType() == null) return;
+        String type = message.getChat().getType();
+        if (!"group".equals(type) && !"supergroup".equals(type)) return;
+        long chatId = message.getChatId();
+        if (KNOWN_GROUP_IDS.add(chatId)) {
+            synchronized (KNOWN_GROUP_IDS) {
+                try {
+                    Files.write(KNOWN_GROUPS_FILE, KNOWN_GROUP_IDS.stream()
+                            .map(String::valueOf).sorted().toList(), StandardCharsets.UTF_8);
+                } catch (IOException e) {
+                    System.err.println("[BROADCAST] Không lưu được danh sách nhóm: " + e.getMessage());
+                }
+            }
+        }
+    }
+
+    private void handleBroadcast(Message message) {
+        long senderId = message.getFrom().getId();
+        if (!ADMIN_IDS.contains(senderId)) {
+            sendMessage(message.getChatId(), "❌ Bạn không có quyền sử dụng lệnh này.");
+            return;
+        }
+        String text = message.getText() == null ? "" : message.getText().trim();
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("(?is)^/noi(?:@\\w+)?(?:\\s+(.*))?$").matcher(text);
+        if (!matcher.matches() || matcher.group(1) == null || matcher.group(1).trim().isEmpty()) {
+            sendMessage(message.getChatId(), "Cách dùng: <code>/noi nội dung cần gửi</code>\nVí dụ: <code>/noi aloo</code>");
+            return;
+        }
+        final String broadcastText = matcher.group(1).trim();
+        final Set<Long> targets = new HashSet<>(KNOWN_GROUP_IDS);
+        if (targets.isEmpty()) {
+            sendMessage(message.getChatId(), "⚠️ Bot chưa ghi nhận nhóm nào. Hãy để bot nhận được ít nhất một tin nhắn trong các nhóm trước.");
+            return;
+        }
+        telegramExecutor.execute(() -> {
+            int sent = 0;
+            int failed = 0;
+            for (Long targetChatId : targets) {
+                try {
+                    SendMessage out = new SendMessage();
+                    out.setChatId(String.valueOf(targetChatId));
+                    out.setText(broadcastText);
+                    // Gửi văn bản thuần để nội dung không bị lỗi do ký tự HTML.
+                    Message sentMessage = execute(out);
+                    // Ghim chính tin thông báo vừa gửi trong từng nhóm.
+                    // Bot cần có quyền ghim tin nhắn (và quyền quản trị phù hợp) trong nhóm.
+                    try {
+                        PinChatMessage pin = new PinChatMessage();
+                        pin.setChatId(String.valueOf(targetChatId));
+                        pin.setMessageId(sentMessage.getMessageId());
+                        pin.setDisableNotification(true);
+                        execute(pin);
+                    } catch (Exception pinError) {
+                        System.err.println("[BROADCAST] Gửi được nhưng không ghim được ở nhóm " + targetChatId + ": " + pinError.getMessage());
+                    }
+                    sent++;
+                } catch (Exception e) {
+                    failed++;
+                    System.err.println("[BROADCAST] Gửi thất bại tới nhóm " + targetChatId + ": " + e.getMessage());
+                }
+            }
+            sendMessage(message.getChatId(), "📣 Đã gửi thông báo tới " + sent + " nhóm." + (failed > 0 ? " Không gửi được tới " + failed + " nhóm (có thể bot đã bị xóa hoặc không còn quyền gửi tin)." : ""));
+        });
+    }
+
     private void ensureUserCached(User user) {
         long now = System.currentTimeMillis();
         Long last = ensuredUsers.get(user.getId());
@@ -291,11 +380,14 @@ public class CasinoBot extends TelegramLongPollingBot {
         User user = message.getFrom();
         long chatId = message.getChatId();
         ensureUserCached(user);
+        rememberGroupIfNeeded(message);
 
         String text = message.getText();
         if (text == null) return;
 
-        if (text.startsWith("/start") || text.startsWith("/restart")) {
+        if (text.matches("(?is)^/noi(?:@\\w+)?(?:\\s|$).*")) {
+            handleBroadcast(message);
+        } else if (text.startsWith("/start") || text.startsWith("/restart")) {
             if (games.containsKey(chatId) || baicaoGames.containsKey(chatId) || baucuaGames.containsKey(chatId)) {
                 sendMessage(chatId, "⚠️ Đang có ván thi đấu diễn ra! Không thể mở menu mới.");
                 return;
