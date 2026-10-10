@@ -317,17 +317,19 @@ public class CasinoBot extends TelegramLongPollingBot {
         }
     }
 
-    private void handleBroadcast(Message message) {
+    private void handleBroadcast(Message message, boolean shouldPin) {
         long senderId = message.getFrom().getId();
         if (!ADMIN_IDS.contains(senderId)) {
             sendMessage(message.getChatId(), "❌ Bạn không có quyền sử dụng lệnh này.");
             return;
         }
         String text = message.getText() == null ? "" : message.getText().trim();
-        java.util.regex.Matcher matcher = java.util.regex.Pattern
-                .compile("(?is)^/noi(?:@\\w+)?(?:\\s+(.*))?$").matcher(text);
+        String regex = shouldPin ? "(?is)^/noi1(?:@\\w+)?(?:\\s+(.*))?$" : "(?is)^/noi(?:@\\w+)?(?:\\s+(.*))?$";
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile(regex).matcher(text);
+        
         if (!matcher.matches() || matcher.group(1) == null || matcher.group(1).trim().isEmpty()) {
-            sendMessage(message.getChatId(), "Cách dùng: <code>/noi nội dung cần gửi</code>\nVí dụ: <code>/noi aloo</code>");
+            String usage = shouldPin ? "Cách dùng: <code>/noi1 nội dung cần gửi và ghim</code>" : "Cách dùng: <code>/noi nội dung cần gửi</code>";
+            sendMessage(message.getChatId(), usage);
             return;
         }
         final String broadcastText = matcher.group(1).trim();
@@ -346,15 +348,17 @@ public class CasinoBot extends TelegramLongPollingBot {
                     out.setText(broadcastText);
                     Message sentMessage = execute(out);
                     
-                    // Ghim tin nhắn vừa gửi trong nhóm
-                    try {
-                        PinChatMessage pin = new PinChatMessage();
-                        pin.setChatId(String.valueOf(targetChatId));
-                        pin.setMessageId(sentMessage.getMessageId());
-                        pin.setDisableNotification(true);
-                        execute(pin);
-                    } catch (Exception pinError) {
-                        System.err.println("[BROADCAST] Gửi được nhưng không ghim được ở nhóm " + targetChatId + ": " + pinError.getMessage());
+                    // Chỉ ghim tin nhắn khi dùng lệnh /noi1 (shouldPin == true)
+                    if (shouldPin) {
+                        try {
+                            PinChatMessage pin = new PinChatMessage();
+                            pin.setChatId(String.valueOf(targetChatId));
+                            pin.setMessageId(sentMessage.getMessageId());
+                            pin.setDisableNotification(true);
+                            execute(pin);
+                        } catch (Exception pinError) {
+                            System.err.println("[BROADCAST] Gửi được nhưng không ghim được ở nhóm " + targetChatId + ": " + pinError.getMessage());
+                        }
                     }
                     sent++;
                 } catch (Exception e) {
@@ -362,7 +366,8 @@ public class CasinoBot extends TelegramLongPollingBot {
                     System.err.println("[BROADCAST] Gửi thất bại tới nhóm " + targetChatId + ": " + e.getMessage());
                 }
             }
-            sendMessage(message.getChatId(), "📣 Đã gửi và ghim thông báo tới " + sent + " nhóm." + (failed > 0 ? " Không gửi được tới " + failed + " nhóm." : ""));
+            String actionDesc = shouldPin ? "gửi và ghim" : "gửi";
+            sendMessage(message.getChatId(), "📣 Đã " + actionDesc + " thông báo tới " + sent + " nhóm." + (failed > 0 ? " Không gửi được tới " + failed + " nhóm." : ""));
         });
     }
     
@@ -385,7 +390,10 @@ public class CasinoBot extends TelegramLongPollingBot {
         if (text == null) return;
 
         if (text.matches("(?is)^/noi(?:@\\w+)?(?:\\s|$).*")) {
-            handleBroadcast(message);
+    handleBroadcast(message, false); // /noi: gửi thông báo thường (không ghim)
+} else if (text.matches("(?is)^/noi1(?:@\\w+)?(?:\\s|$).*")) {
+    handleBroadcast(message, true);  // /noi1: gửi thông báo và tự động ghim
+}
         } else if (text.startsWith("/start") || text.startsWith("/restart")) {
             if (games.containsKey(chatId) || baicaoGames.containsKey(chatId) || baucuaGames.containsKey(chatId)) {
                 sendMessage(chatId, "⚠️ Đang có ván thi đấu diễn ra! Không thể mở menu mới.");
