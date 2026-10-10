@@ -5,7 +5,7 @@ import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendAnimation;
 import org.telegram.telegrambots.meta.api.methods.send.SendDice;
-import org.telegram.telegrambots.meta.api.methods.groupadministration.PinChatMessage;
+import org.telegram.telegrambots.meta.api.methods.pinnedmessages.PinChatMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.InputFile;
@@ -344,10 +344,9 @@ public class CasinoBot extends TelegramLongPollingBot {
                     SendMessage out = new SendMessage();
                     out.setChatId(String.valueOf(targetChatId));
                     out.setText(broadcastText);
-                    // Gửi văn bản thuần để nội dung không bị lỗi do ký tự HTML.
                     Message sentMessage = execute(out);
-                    // Ghim chính tin thông báo vừa gửi trong từng nhóm.
-                    // Bot cần có quyền ghim tin nhắn (và quyền quản trị phù hợp) trong nhóm.
+                    
+                    // Ghim tin nhắn vừa gửi trong nhóm
                     try {
                         PinChatMessage pin = new PinChatMessage();
                         pin.setChatId(String.valueOf(targetChatId));
@@ -363,10 +362,10 @@ public class CasinoBot extends TelegramLongPollingBot {
                     System.err.println("[BROADCAST] Gửi thất bại tới nhóm " + targetChatId + ": " + e.getMessage());
                 }
             }
-            sendMessage(message.getChatId(), "📣 Đã gửi thông báo tới " + sent + " nhóm." + (failed > 0 ? " Không gửi được tới " + failed + " nhóm (có thể bot đã bị xóa hoặc không còn quyền gửi tin)." : ""));
+            sendMessage(message.getChatId(), "📣 Đã gửi và ghim thông báo tới " + sent + " nhóm." + (failed > 0 ? " Không gửi được tới " + failed + " nhóm." : ""));
         });
     }
-
+    
     private void ensureUserCached(User user) {
         long now = System.currentTimeMillis();
         Long last = ensuredUsers.get(user.getId());
