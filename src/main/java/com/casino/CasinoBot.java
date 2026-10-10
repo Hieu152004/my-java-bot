@@ -39,11 +39,9 @@ import java.util.concurrent.*;
 
 public class CasinoBot extends TelegramLongPollingBot {
 
-    // Token bot được đặt trực tiếp trong source theo yêu cầu.
     private static final String TOKEN = "8846203742:AAH6phjqvFPTDd6Y6xakWSu5RY7t5DiJjTA";
 
     private static final Set<Long> ADMIN_IDS = Set.of(7964831905L, 7432218242L);
-    // Nhóm đã tương tác với bot; được lưu vào file nếu môi trường cho phép.
     private static final Set<Long> KNOWN_GROUP_IDS = ConcurrentHashMap.newKeySet();
     private static final Path KNOWN_GROUPS_FILE = Paths.get("known_groups.txt");
 
@@ -208,7 +206,7 @@ public class CasinoBot extends TelegramLongPollingBot {
     }
 
     private static class HandScore implements Comparable<HandScore> {
-        int type; // 1: Điểm, 2: 3 Tây, 3: Liêng, 4: Cào
+        int type;
         int primaryValue;
         int subValue;
         String description;
@@ -348,7 +346,6 @@ public class CasinoBot extends TelegramLongPollingBot {
                     out.setText(broadcastText);
                     Message sentMessage = execute(out);
                     
-                    // Chỉ ghim tin nhắn khi dùng lệnh /noi1 (shouldPin == true)
                     if (shouldPin) {
                         try {
                             PinChatMessage pin = new PinChatMessage();
@@ -370,7 +367,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             sendMessage(message.getChatId(), "📣 Đã " + actionDesc + " thông báo tới " + sent + " nhóm." + (failed > 0 ? " Không gửi được tới " + failed + " nhóm." : ""));
         });
     }
-    
+
     private void ensureUserCached(User user) {
         long now = System.currentTimeMillis();
         Long last = ensuredUsers.get(user.getId());
@@ -390,10 +387,9 @@ public class CasinoBot extends TelegramLongPollingBot {
         if (text == null) return;
 
         if (text.matches("(?is)^/noi(?:@\\w+)?(?:\\s|$).*")) {
-    handleBroadcast(message, false); // /noi: gửi thông báo thường (không ghim)
-} else if (text.matches("(?is)^/noi1(?:@\\w+)?(?:\\s|$).*")) {
-    handleBroadcast(message, true);  // /noi1: gửi thông báo và tự động ghim
-}
+            handleBroadcast(message, false);
+        } else if (text.matches("(?is)^/noi1(?:@\\w+)?(?:\\s|$).*")) {
+            handleBroadcast(message, true);
         } else if (text.startsWith("/start") || text.startsWith("/restart")) {
             if (games.containsKey(chatId) || baicaoGames.containsKey(chatId) || baucuaGames.containsKey(chatId)) {
                 sendMessage(chatId, "⚠️ Đang có ván thi đấu diễn ra! Không thể mở menu mới.");
@@ -539,8 +535,6 @@ public class CasinoBot extends TelegramLongPollingBot {
     }
 
     private String getMention(long userId, String name) {
-        // Escape display names so a name containing &, <, > or quotes cannot
-        // invalidate Telegram HTML and make the result message silently fail.
         String safeName = name == null ? "Người dùng" : name;
         safeName = safeName.replace("&", "&amp;")
                            .replace("<", "&lt;")
@@ -548,8 +542,6 @@ public class CasinoBot extends TelegramLongPollingBot {
                            .replace("\"", "&quot;");
         return String.format("<a href=\"tg://user?id=%d\">%s</a>", userId, safeName);
     }
-
-    // ==================== GAME BẦU CUA ====================
 
     private void createBauCuaGame(long chatId) {
         BauCuaGame game = new BauCuaGame();
@@ -639,7 +631,6 @@ public class CasinoBot extends TelegramLongPollingBot {
             for (List<BauCuaBet> list : game.bets.values()) {
                 totalBetsCount += list.size();
             }
-            // Nếu hết 45s mà không có ai đặt cược hoặc cái không bấm, hủy ván và hoàn tiền
             if (totalBetsCount == 0 || game.dealerId == null) {
                 BauCuaGame removed = baucuaGames.remove(chatId);
                 if (removed != null) {
@@ -674,7 +665,6 @@ public class CasinoBot extends TelegramLongPollingBot {
 
     private InlineKeyboardMarkup getBauCuaBettingKeyboard() {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
-        // Hiển thị 6 hàng theo từng cửa; mỗi hàng có 3 mức cược để Telegram không rút gọn thành "...".
         String[] faces = {"🎃 Bầu", "🦀 Cua", "🦐 Tôm", "🐟 Cá", "🐓 Gà", "🦌 Nai"};
         for (int face = 0; face < BAUCUA_ICONS.length; face++) {
             List<InlineKeyboardButton> row = new ArrayList<>();
@@ -996,7 +986,6 @@ public class CasinoBot extends TelegramLongPollingBot {
     }
 
     private byte[] generateBauCuaGif(int[] results) throws Exception {
-        // Kết quả được truyền vào từ settleBauCuaGame, nên GIF và thanh toán dùng cùng một kết quả.
         final int width = 360;
         final int height = 220;
         final int totalFrames = 18;
@@ -1017,7 +1006,6 @@ public class CasinoBot extends TelegramLongPollingBot {
                 g.setStroke(new BasicStroke(4));
                 g.drawRoundRect(5, 5, width - 10, height - 10, 18, 18);
 
-                // Bàn và ba viên xúc xắc luôn được vẽ trước; bát phủ lên trên chúng.
                 g.setColor(new Color(25, 105, 57));
                 g.fillRoundRect(35, 45, 290, 135, 28, 28);
                 g.setColor(new Color(230, 184, 65));
@@ -1038,8 +1026,6 @@ public class CasinoBot extends TelegramLongPollingBot {
                     g.drawString(labels[i], xs[i] - 1, 151);
                 }
 
-                // Bát úp kín xúc xắc ở đầu GIF, sau đó nghiêng và trượt sang phải,
-                // lần lượt để lộ các viên từ trái qua phải.
                 double progress = frame / (double) (totalFrames - 1);
                 int bowlX = (int) (28 + progress * 365);
                 if (frame < totalFrames - 1) {
@@ -1049,7 +1035,6 @@ public class CasinoBot extends TelegramLongPollingBot {
                     java.awt.geom.AffineTransform oldTransform = g.getTransform();
                     double tilt = -Math.toRadians(2 + progress * 18);
                     g.rotate(tilt, bowlX + bw / 2.0, bowlY + bh / 2.0);
-                    // Thân bát dạng vòm, có vành sáng và lòng bát tối tạo cảm giác bát thật.
                     g.setColor(new Color(38, 39, 45));
                     g.fillOval(bowlX, bowlY, bw, bh);
                     g.setColor(new Color(185, 190, 198));
@@ -1084,7 +1069,7 @@ public class CasinoBot extends TelegramLongPollingBot {
                     gce.setAttribute("disposalMethod", "none");
                     gce.setAttribute("userInputFlag", "FALSE");
                     gce.setAttribute("transparentColorFlag", "FALSE");
-                    gce.setAttribute("delayTime", "12"); // 120 ms/frame
+                    gce.setAttribute("delayTime", "12");
                     gce.setAttribute("transparentColorIndex", "0");
                 }
                 metadata.setFromTree(format, root);
@@ -1096,8 +1081,6 @@ public class CasinoBot extends TelegramLongPollingBot {
         }
         return bao.toByteArray();
     }
-
-    // ==================== CÁC GAME VÀ LỆNH KHÁC ====================
 
     private void createDiceGame(long chatId) {
         DiceGame game = new DiceGame();
@@ -1953,16 +1936,10 @@ public class CasinoBot extends TelegramLongPollingBot {
                       .append(statusNote);
             }
 
-            // Mark the round closed before sending UI updates, so callbacks from
-            // the old betting keyboard cannot settle the same hand twice.
             baicaoGames.remove(chatId, game);
             if (game.messageId != null) deleteMessage(chatId, game.messageId);
             if (game.lastTagMessageId != null) deleteMessage(chatId, game.lastTagMessageId);
 
-            // Send the result first, and only enqueue the main menu after Telegram
-            // confirms the result message was sent. Previously both sends were
-            // asynchronous on an 8-thread pool, so the menu could appear first;
-            // HTML parse errors were also swallowed, leaving no result at all.
             SendMessage resultMessage = new SendMessage();
             resultMessage.setChatId(String.valueOf(chatId));
             resultMessage.setText(winMsg.toString());
@@ -1973,7 +1950,6 @@ public class CasinoBot extends TelegramLongPollingBot {
                     execute(resultMessage);
                     resultSent = true;
                 } catch (Exception htmlOrTelegramError) {
-                    // Fallback to plain text if Telegram rejects HTML formatting.
                     try {
                         SendMessage fallback = new SendMessage();
                         fallback.setChatId(String.valueOf(chatId));
@@ -1987,7 +1963,6 @@ public class CasinoBot extends TelegramLongPollingBot {
                         System.err.println("Không gửi được kết quả Bài Tố chat=" + chatId + ": " + fallbackError.getMessage());
                     }
                 }
-                // Do not immediately replace the result with the main menu.
                 if (resultSent) {
                     try { Thread.sleep(1200); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
                     sendMainMenu(chatId);
