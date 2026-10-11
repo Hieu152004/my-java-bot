@@ -2942,6 +2942,26 @@ public class CasinoBot extends TelegramLongPollingBot {
 
         InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
-        rows.add(
-      }
+        rows.add(List.of(
+                createBtn("🎲 XÚC XẮC", "new_game"),
+                createBtn("🏺 BẦU CUA", "new_baucua")
+        ));
+        rows.add(List.of(
+                createBtn("🃏 BÀI TỐ", "bc_select_bet"),
+                createBtn("♠️ XÌ LÁT", "new_xilat")
+        ));
+        rows.add(List.of(
+                createBtn("💰 SỐ DƯ", "balance"),
+                createBtn("🏆 BẢNG XẾP HẠNG", "top")
+        ));
+        markup.setKeyboard(rows);
+        msg.setReplyMarkup(markup);
+
+        telegramExecutor.execute(() -> { 
+            try { 
+                Message sent = execute(msg); 
+                lastMenuMessageIds.put(chatId, sent.getMessageId());
+            } catch (Exception ignored) {} 
+        });
+    }
 }
