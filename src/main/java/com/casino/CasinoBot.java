@@ -240,12 +240,13 @@ public class CasinoBot extends TelegramLongPollingBot {
         XiLatSideBet(long offererId, String offererName, long amount) { this.offererId=offererId; this.offererName=offererName; this.amount=amount; }
     }
     private static class XiLatGame {
-        long dealerId; String dealerName; Integer messageId; Integer playMessageId; boolean dealt=false; boolean revealing=false; boolean finished=false;
+        long dealerId; String dealerName; Integer messageId; Integer playMessageId; Integer offerMenuMessageId; boolean dealt=false; boolean revealing=false; boolean finished=false;
         List<Long> order = new CopyOnWriteArrayList<>();
         Map<Long,String> names = new ConcurrentHashMap<>();
         Map<Long,List<Card>> hands = new ConcurrentHashMap<>();
         Set<Long> stood = ConcurrentHashMap.newKeySet(); Set<Long> revealed = ConcurrentHashMap.newKeySet();
         List<XiLatSideBet> sideBets = new CopyOnWriteArrayList<>();
+        List<Integer> tempMessageIds = new CopyOnWriteArrayList<>();
         int revealIndex=0; long started=System.currentTimeMillis(); ScheduledFuture<?> timer;
     }
 
@@ -490,9 +491,35 @@ public class CasinoBot extends TelegramLongPollingBot {
             if (games.containsKey(chatId) || baicaoGames.containsKey(chatId) || baucuaGames.containsKey(chatId) || xilatGames.containsKey(chatId)) { answerAlert(query.getId(), "⚠️ Đang có ván chơi trong nhóm này!"); return; }
             createXiLatLobby(chatId);
         } else if (data.equals("xl_offer_menu")) {
-            XiLatGame g=xilatGames.get(chatId); if(g==null){answerAlert(query.getId(),"Chưa có bàn Xì Lát.");return;}
-            List<List<InlineKeyboardButton>> rows=new ArrayList<>(); for(long a:XILAT_SIDE_BETS) rows.add(List.of(createBtn("🤝 Cược ngoài "+formatShortMoney(a),"xl_offer:"+a)));
-            sendMessageWithMarkup(chatId,"Chọn mức cược ngoài (tiền được khóa cho đến khi thanh toán/hủy kèo):",new InlineKeyboardMarkup(rows)); answerAlert(query.getId(),"Chọn mức cược ngoài.");
+            XiLatGame g = xilatGames.get(chatId);
+            if (g == null) { answerAlert(query.getId(), "Chưa có bàn Xì Lát."); return; }
+            if (g.dealt) { answerAlert(query.getId(), "Bài đã chia, không thể chọn cược ngoài."); return; }
+            
+            // Nếu đã có menu cược ngoài đang hiển thị, chỉ gửi thông báo
+            if (g.offerMenuMessageId != null) {
+                answerAlert(query.getId(), "Menu cược ngoài đã hiển thị ở trên.");
+                return;
+            }
+
+            List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+            for (long a : XILAT_SIDE_BETS) {
+                rows.add(List.of(createBtn("🤝 Cược ngoài " + formatShortMoney(a), "xl_offer:" + a)));
+            }
+            
+            SendMessage msg = new SendMessage();
+            msg.setChatId(String.valueOf(chatId));
+            msg.setText("Chọn mức cược ngoài (tiền được khóa cho đến khi thanh toán/hủy kèo):");
+            msg.setReplyMarkup(new InlineKeyboardMarkup(rows));
+            msg.setParseMode("HTML");
+            
+            telegramExecutor.execute(() -> {
+                try {
+                    Message sent = execute(msg);
+                    g.offerMenuMessageId = sent.getMessageId();
+                    g.tempMessageIds.add(sent.getMessageId());
+                } catch (Exception ignored) {}
+            });
+            answerAlert(query.getId(), "Chọn mức cược ngoài.");
         } else if (data.equals("xl_dealer")) {
             createXiLatDealer(chatId, user, query.getId());
         } else if (data.equals("xl_join")) {
@@ -2483,11 +2510,19 @@ public class CasinoBot extends TelegramLongPollingBot {
             List<Long> all=new ArrayList<>(g.order); all.add(g.dealerId);
             for(long id:all) { List<Card> h=new ArrayList<>(); h.add(deck.remove(0)); h.add(deck.remove(0)); g.hands.put(id,h); }
             g.dealt=true;
-            // Remove the lobby menu once cards are dealt so old JOIN/DEAL buttons cannot linger.
+            
+            // Xóa menu bàn ban đầu khi chia bài
             if (g.messageId != null) {
                 deleteMessage(chatId, g.messageId);
                 g.messageId = null;
             }
+            
+            // Tự động xóa toàn bộ các tin nhắn tạm phát sinh trước đó (menu cược ngoài, tạo kèo, nhận kèo)
+            for (Integer tempId : g.tempMessageIds) {
+                deleteMessage(chatId, tempId);
+            }
+            g.tempMessageIds.clear();
+
             g.timer = scheduler.schedule(() -> {
                 XiLatGame live=xilatGames.get(chatId); if(live!=g || live.finished || live.revealing) return;
                 live.stood.addAll(live.order);
@@ -2537,7 +2572,19 @@ public class CasinoBot extends TelegramLongPollingBot {
         answerAlert(q,"Đã dằn bài.");
         String name=escapeHtml(g.names.getOrDefault(user.getId(), displayName(user)));
         int count=g.hands.getOrDefault(user.getId(), Collections.emptyList()).size();
-        sendMessageWithMarkup(chatId,"🎩 <b>Dealer</b>\n👑 "+name+" đã dằn bài, tổng "+count+" lá bài",new InlineKeyboardMarkup(List.of(List.of(createBtn("👉 Khui bài ["+g.names.getOrDefault(user.getId(), displayName(user))+ "]","xl_reveal:"+user.getId())))));
+        
+        SendMessage msg = new SendMessage();
+        msg.setChatId(String.valueOf(chatId));
+        msg.setText("🎩 <b>Dealer</b>\n👑 "+name+" đã dằn bài, tổng "+count+" lá bài");
+        msg.setParseMode("HTML");
+        msg.setReplyMarkup(new InlineKeyboardMarkup(List.of(List.of(createBtn("👉 Khui bài ["+g.names.getOrDefault(user.getId(), displayName(user))+ "]","xl_reveal:"+user.getId())))));
+        telegramExecutor.execute(() -> {
+            try {
+                Message sent = execute(msg);
+                g.tempMessageIds.add(sent.getMessageId());
+            } catch (Exception ignored) {}
+        });
+
         sendXiLatPlayMessage(chatId);
         if(xiLatDone(g)) beginXiLatDealer(chatId);
     }
@@ -2563,7 +2610,21 @@ public class CasinoBot extends TelegramLongPollingBot {
             telegramExecutor.execute(()->{try{execute(edit);}catch(Exception ex){System.err.println("[XILAT] edit play message: "+ex.getMessage());}});
         }
     }
-    private void beginXiLatDealer(long chatId){XiLatGame g=xilatGames.get(chatId);if(g==null||g.revealing)return;g.revealing=true;if(g.timer!=null)g.timer.cancel(false);List<Card> dealer=g.hands.get(g.dealerId);while(xiLatPoints(dealer)<16&&dealer.size()<5&&xiLatPoints(dealer)<=21){List<Card>d=buildRemainingDeck(g);if(d.isEmpty())break;dealer.add(d.get(0));}sendMessageWithMarkup(chatId,"🎩 Nhà cái đã hoàn tất bài. Bắt đầu khui và thanh toán từng nhà.",new InlineKeyboardMarkup(List.of(List.of(createBtn("👉 KHUI NHÀ TIẾP THEO","xl_reveal")))));scheduler.schedule(()->autoRevealXiLat(chatId,g),30,TimeUnit.SECONDS);}
+    private void beginXiLatDealer(long chatId){XiLatGame g=xilatGames.get(chatId);if(g==null||g.revealing)return;g.revealing=true;if(g.timer!=null)g.timer.cancel(false);List<Card> dealer=g.hands.get(g.dealerId);while(xiLatPoints(dealer)<16&&dealer.size()<5&&xiLatPoints(dealer)<=21){List<Card>d=buildRemainingDeck(g);if(d.isEmpty())break;dealer.add(d.get(0));}
+    
+    SendMessage msg = new SendMessage();
+    msg.setChatId(String.valueOf(chatId));
+    msg.setText("🎩 Nhà cái đã hoàn tất bài. Bắt đầu khui và thanh toán từng nhà.");
+    msg.setParseMode("HTML");
+    msg.setReplyMarkup(new InlineKeyboardMarkup(List.of(List.of(createBtn("👉 KHUI NHÀ TIẾP THEO","xl_reveal")))));
+    telegramExecutor.execute(() -> {
+        try {
+            Message sent = execute(msg);
+            g.tempMessageIds.add(sent.getMessageId());
+        } catch (Exception ignored) {}
+    });
+    
+    scheduler.schedule(()->autoRevealXiLat(chatId,g),30,TimeUnit.SECONDS);}
     private void autoRevealXiLat(long chatId, XiLatGame g){if(xilatGames.get(chatId)!=g||g.finished)return;if(g.revealed.size()>=g.order.size()){finishXiLat(chatId,g);return;}revealNextXiLatHouse(chatId,null,null,true);scheduler.schedule(()->autoRevealXiLat(chatId,g),2,TimeUnit.SECONDS);}
     private int xiLatRank(List<Card> h){if(xiLatSpecial(h,"bang"))return 5;if(xiLatSpecial(h,"dach"))return 4;if(h.size()==5&&xiLatPoints(h)<=21)return 3;if(xiLatPoints(h)>21)return 0;return 1;}
     private String xiLatHandText(List<Card> h){StringBuilder b=new StringBuilder();for(Card c:h){if(b.length()>0)b.append(" ");b.append(c);}int pts=xiLatPoints(h);if(xiLatSpecial(h,"bang"))return b+" (Xì Bàng)";if(xiLatSpecial(h,"dach"))return b+" (Xì Dách)";if(h.size()==5&&pts<=21)return b+" (Ngũ Linh, "+pts+")";return b+" ("+pts+" điểm)";}
@@ -2604,26 +2665,164 @@ public class CasinoBot extends TelegramLongPollingBot {
             resultMessage="♠️ <b>KHUI NHÀ: "+escapeHtml(g.names.get(playerId))+"</b>\n🙋 Bài: "+escapeHtml(xiLatHandText(ph))+"\n🎩 Bài nhà cái: "+escapeHtml(xiLatHandText(dh))+"\n🏁 Kết quả: <b>"+outcome+"</b>\n💰 "+(net>0?"Người chơi +5B; nhà cái -5B":net<0?"Người chơi -5B; nhà cái +5B":"Hoàn cược 5B")+".";
         }
         if(q!=null)answerAlert(q,"Đã khui và tính tiền nhà này.");
-        sendMessage(chatId,resultMessage);
+        
+        SendMessage msgRes = new SendMessage();
+        msgRes.setChatId(String.valueOf(chatId));
+        msgRes.setText(resultMessage);
+        msgRes.setParseMode("HTML");
+        telegramExecutor.execute(() -> {
+            try {
+                Message sent = execute(msgRes);
+                g.tempMessageIds.add(sent.getMessageId());
+            } catch (Exception ignored) {}
+        });
+
         if(g.revealed.size()>=g.order.size()) finishXiLat(chatId,g);
-        else sendMessageWithMarkup(chatId,"👉 Đã tính tiền nhà này. Nhà cái bấm nút <b>Khui bài [tên người chơi]</b> ngay trong thông báo người đã dằn tiếp theo.",new InlineKeyboardMarkup(List.of(List.of(createBtn("👉 KHUI NHÀ TIẾP THEO","xl_reveal")))));
-    }
-    private void finishXiLat(long chatId,XiLatGame g){if(g.finished)return;g.finished=true;if(g.timer!=null)g.timer.cancel(true);StringBuilder b=new StringBuilder("🏆 <b>TỔNG KẾT XÌ LÁT</b>\n");b.append("🎩 Nhà cái: ").append(escapeHtml(g.dealerName)).append("\n");for(long id:g.order)b.append("• ").append(escapeHtml(g.names.get(id))).append(": ").append(escapeHtml(xiLatHandText(g.hands.get(id)))).append("\n");
-        b.append("\n🤝 <b>KẾT QUẢ CƯỢC NGOÀI</b>\n"); boolean any=false;
-        for(XiLatSideBet bet:g.sideBets){if(bet.settled)continue;if(bet.accepterId==0){Database.changeBalance(bet.offererId,bet.amount);bet.settled=true;b.append("• Kèo ").append(formatShortMoney(bet.amount)).append(" chưa có người nhận — hoàn tiền cho ").append(escapeHtml(bet.offererName)).append(".\n");continue;}
-            if(!g.hands.containsKey(bet.offererId)||!g.hands.containsKey(bet.accepterId)){Database.changeBalance(bet.offererId,bet.amount);Database.changeBalance(bet.accepterId,bet.amount);bet.settled=true;b.append("• Kèo ").append(formatShortMoney(bet.amount)).append(" bị hủy — hoàn tiền hai bên.\n");continue;}
-            int ar=xiLatRank(g.hands.get(bet.offererId)), br=xiLatRank(g.hands.get(bet.accepterId));int ap=xiLatPoints(g.hands.get(bet.offererId)),bp=xiLatPoints(g.hands.get(bet.accepterId));int cmp=ar!=br?Integer.compare(ar,br):Integer.compare(ap,bp);
-            if(cmp==0){Database.changeBalance(bet.offererId,bet.amount);Database.changeBalance(bet.accepterId,bet.amount);b.append("• ").append(escapeHtml(bet.offererName)).append(" hòa ").append(escapeHtml(bet.accepterName)).append(" — hoàn cược.\n");}
-            else {long winner=cmp>0?bet.offererId:bet.accepterId;Database.changeBalance(winner,bet.amount*2);b.append("• ").append(escapeHtml(winner==bet.offererId?bet.offererName:bet.accepterName)).append(" thắng cược ngoài ").append(formatShortMoney(bet.amount)).append(" trước ").append(escapeHtml(winner==bet.offererId?bet.accepterName:bet.offererName)).append(".\n");}
-            bet.settled=true;any=true;
+        else {
+            SendMessage msgNext = new SendMessage();
+            msgNext.setChatId(String.valueOf(chatId));
+            msgNext.setText("👉 Đã tính tiền nhà này. Nhà cái bấm nút <b>Khui bài [tên người chơi]</b> ngay trong thông báo người đã dằn tiếp theo.");
+            msgNext.setParseMode("HTML");
+            msgNext.setReplyMarkup(new InlineKeyboardMarkup(List.of(List.of(createBtn("👉 KHUI NHÀ TIẾP THEO","xl_reveal")))));
+            telegramExecutor.execute(() -> {
+                try {
+                    Message sent = execute(msgNext);
+                    g.tempMessageIds.add(sent.getMessageId());
+                } catch (Exception ignored) {}
+            });
         }
-        if(!any&&g.sideBets.isEmpty())b.append("Không có kèo ngoài.\n");
-        if(g.playMessageId!=null) deleteMessage(chatId,g.playMessageId);
-        if(g.messageId!=null) deleteMessage(chatId,g.messageId);
-        xilatGames.remove(chatId,g);sendMessage(chatId,b.toString());sendMainMenu(chatId);}
-    private void offerXiLatSideBet(long chatId,User user,long amount,String q){XiLatGame g=xilatGames.get(chatId);if(g==null||g.dealt){answerAlert(q,"Cược ngoài chỉ tạo được trước khi chia bài.");return;}if(Arrays.stream(XILAT_SIDE_BETS).noneMatch(v->v==amount)){answerAlert(q,"Mức cược không hợp lệ.");return;}if(user.getId()==g.dealerId){answerAlert(q,"Nhà cái không tham gia cược ngoài.");return;}if(!g.order.contains(user.getId())){answerAlert(q,"Bạn cần tham gia bàn Xì Lát trước khi tạo cược ngoài.");return;}if(Database.getBalance(user.getId())<amount||!Database.tryChangeBalance(user.getId(),-amount)){answerAlert(q,"Không đủ điểm để khóa kèo.");return;}g.sideBets.add(new XiLatSideBet(user.getId(),displayName(user),amount));answerAlert(q,"Đã tạo kèo ngoài "+formatShortMoney(amount)+"; chờ người nhận.");sendMessageWithMarkup(chatId,"🤝 <b>"+escapeHtml(displayName(user))+" muốn cược ngoài "+formatShortMoney(amount)+".</b>",new InlineKeyboardMarkup(List.of(List.of(createBtn("NHẬN KÈO","xl_accept:"+(g.sideBets.size()-1))))));}
-    private void acceptXiLatSideBet(long chatId,User user,int idx,String q){XiLatGame g=xilatGames.get(chatId);if(g==null||g.dealt||idx<0||idx>=g.sideBets.size()){answerAlert(q,"Kèo không còn khả dụng.");return;}XiLatSideBet b=g.sideBets.get(idx);if(b.accepterId!=0){answerAlert(q,"Kèo này đã có người nhận rồi.");return;}if(b.offererId==user.getId()){answerAlert(q,"Bạn là người tạo kèo nên không thể tự nhận kèo của mình; hãy để người chơi khác nhận.");return;}if(user.getId()==g.dealerId||!g.order.contains(user.getId())){answerAlert(q,"Chỉ người chơi khác đã tham gia bàn mới được nhận kèo ngoài.");return;}if(Database.getBalance(user.getId())<b.amount||!Database.tryChangeBalance(user.getId(),-b.amount)){answerAlert(q,"Không đủ điểm nhận kèo.");return;}b.accepterId=user.getId();b.accepterName=displayName(user);g.names.putIfAbsent(user.getId(),b.accepterName);answerAlert(q,"Đã nhận kèo ngoài.");sendMessage(chatId,"🤝 Kèo ngoài đã ghép: "+escapeHtml(b.offererName)+" vs "+escapeHtml(b.accepterName)+" — "+formatShortMoney(b.amount)+".");}
-    private String escapeHtml(String s){if(s==null)return "Người chơi";return s.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\"","&quot;");}
+    }
+
+    private void finishXiLat(long chatId, XiLatGame g) {
+        if(g.finished) return;
+        g.finished = true;
+        if(g.timer != null) g.timer.cancel(true);
+
+        // Xóa toàn bộ các tin nhắn tạm phát sinh trong ván
+        if(g.playMessageId != null) deleteMessage(chatId, g.playMessageId);
+        if(g.messageId != null) deleteMessage(chatId, g.messageId);
+        for(Integer tempId : g.tempMessageIds) {
+            deleteMessage(chatId, tempId);
+        }
+        g.tempMessageIds.clear();
+
+        StringBuilder b = new StringBuilder();
+        List<Card> dealerHand = g.hands.get(g.dealerId);
+        b.append("Bài của người cầm cái là ");
+        if(dealerHand != null) {
+            for(int i = 0; i < dealerHand.size(); i++) {
+                if(i > 0) b.append(" ");
+                b.append(dealerHand.get(i));
+            }
+        }
+        b.append("\nKết quả cược ngoài:\n");
+
+        if(g.sideBets.isEmpty()) {
+            b.append("Không có kèo ngoài.\n");
+        } else {
+            int idx = 1;
+            for(XiLatSideBet bet : g.sideBets) {
+                if(bet.settled) continue;
+                if(bet.accepterId == 0) {
+                    Database.changeBalance(bet.offererId, bet.amount);
+                    bet.settled = true;
+                    b.append(idx++).append(": ").append(getMention(bet.offererId, bet.offererName))
+                     .append(": +0 điểm (Không có người nhận kèo)\n");
+                    continue;
+                }
+                if(!g.hands.containsKey(bet.offererId) || !g.hands.containsKey(bet.accepterId)) {
+                    Database.changeBalance(bet.offererId, bet.amount);
+                    Database.changeBalance(bet.accepterId, bet.amount);
+                    bet.settled = true;
+                    b.append(idx++).append(": Hủy kèo giữa ").append(getMention(bet.offererId, bet.offererName))
+                     .append(" và ").append(getMention(bet.accepterId, bet.accepterName)).append("\n");
+                    continue;
+                }
+
+                int ar = xiLatRank(g.hands.get(bet.offererId));
+                int br = xiLatRank(g.hands.get(bet.accepterId));
+                int ap = xiLatPoints(g.hands.get(bet.offererId));
+                int bp = xiLatPoints(g.hands.get(bet.accepterId));
+                int cmp = (ar != br) ? Integer.compare(ar, br) : Integer.compare(ap, bp);
+
+                if(cmp == 0) {
+                    Database.changeBalance(bet.offererId, bet.amount);
+                    Database.changeBalance(bet.accepterId, bet.amount);
+                    b.append(idx++).append(": ").append(getMention(bet.offererId, bet.offererName))
+                     .append(": +0 điểm , ").append(getMention(bet.accepterId, bet.accepterName))
+                     .append(": +0 điểm\n");
+                } else if(cmp > 0) {
+                    Database.changeBalance(bet.offererId, bet.amount * 2);
+                    b.append(idx++).append(": ").append(getMention(bet.offererId, bet.offererName))
+                     .append(": +").append(formatDetailedMoney(bet.amount)).append(" điểm , ")
+                     .append(getMention(bet.accepterId, bet.accepterName))
+                     .append(": -").append(formatDetailedMoney(bet.amount)).append(" điểm\n");
+                } else {
+                    Database.changeBalance(bet.accepterId, bet.amount * 2);
+                    b.append(idx++).append(": ").append(getMention(bet.offererId, bet.offererName))
+                     .append(": -").append(formatDetailedMoney(bet.amount)).append(" điểm , ")
+                     .append(getMention(bet.accepterId, bet.accepterName))
+                     .append(": +").append(formatDetailedMoney(bet.amount)).append(" điểm\n");
+                }
+                bet.settled = true;
+            }
+        }
+
+        xilatGames.remove(chatId, g);
+        sendMessage(chatId, b.toString());
+        sendMainMenu(chatId);
+    }
+
+    private void offerXiLatSideBet(long chatId, User user, long amount, String q) {
+        XiLatGame g = xilatGames.get(chatId);
+        if (g == null || g.dealt) { answerAlert(q, "Cược ngoài chỉ tạo được trước khi chia bài."); return; }
+        if (Arrays.stream(XILAT_SIDE_BETS).noneMatch(v -> v == amount)) { answerAlert(q, "Mức cược không hợp lệ."); return; }
+        if (user.getId() == g.dealerId) { answerAlert(q, "Nhà cái không tham gia cược ngoài."); return; }
+        if (!g.order.contains(user.getId())) { answerAlert(q, "Bạn cần tham gia bàn Xì Lát trước khi tạo cược ngoài."); return; }
+        if (Database.getBalance(user.getId()) < amount || !Database.tryChangeBalance(user.getId(), -amount)) { answerAlert(q, "Không đủ điểm để khóa kèo."); return; }
+        g.sideBets.add(new XiLatSideBet(user.getId(), displayName(user), amount));
+        answerAlert(q, "Đã tạo kèo ngoài " + formatShortMoney(amount) + "; chờ người nhận.");
+        
+        SendMessage msg = new SendMessage();
+        msg.setChatId(String.valueOf(chatId));
+        msg.setText("🤝 <b>" + escapeHtml(displayName(user)) + " muốn cược ngoài " + formatShortMoney(amount) + ".</b>");
+        msg.setParseMode("HTML");
+        msg.setReplyMarkup(new InlineKeyboardMarkup(List.of(List.of(createBtn("NHẬN KÈO", "xl_accept:" + (g.sideBets.size() - 1))))));
+        telegramExecutor.execute(() -> {
+            try {
+                Message sent = execute(msg);
+                g.tempMessageIds.add(sent.getMessageId());
+            } catch (Exception ignored) {}
+        });
+    }
+
+    private void acceptXiLatSideBet(long chatId, User user, int idx, String q) {
+        XiLatGame g = xilatGames.get(chatId);
+        if (g == null || g.dealt || idx < 0 || idx >= g.sideBets.size()) { answerAlert(q, "Kèo không còn khả dụng."); return; }
+        XiLatSideBet b = g.sideBets.get(idx);
+        if (b.accepterId != 0) { answerAlert(q, "Kèo này đã có người nhận rồi."); return; }
+        if (b.offererId == user.getId()) { answerAlert(q, "Bạn là người tạo kèo nên không thể tự nhận kèo của mình; hãy để người chơi khác nhận."); return; }
+        if (user.getId() == g.dealerId || !g.order.contains(user.getId())) { answerAlert(q, "Chỉ người chơi khác đã tham gia bàn mới được nhận kèo ngoài."); return; }
+        if (Database.getBalance(user.getId()) < b.amount || !Database.tryChangeBalance(user.getId(), -b.amount)) { answerAlert(q, "Không đủ điểm nhận kèo."); return; }
+        b.accepterId = user.getId(); b.accepterName = displayName(user); g.names.putIfAbsent(user.getId(), b.accepterName);
+        answerAlert(q, "Đã nhận kèo ngoài.");
+        
+        SendMessage msg = new SendMessage();
+        msg.setChatId(String.valueOf(chatId));
+        msg.setText("🤝 Kèo ngoài đã ghép: " + escapeHtml(b.offererName) + " vs " + escapeHtml(b.accepterName) + " — " + formatShortMoney(b.amount) + ".");
+        msg.setParseMode("HTML");
+        telegramExecutor.execute(() -> {
+            try {
+                Message sent = execute(msg);
+                g.tempMessageIds.add(sent.getMessageId());
+            } catch (Exception ignored) {}
+        });
+    }
+
+    private String escapeHtml(String s) {
+        if(s == null) return "Người chơi";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
+    }
 
     private void sendMainMenu(long chatId) {
         Integer oldMenuId = lastMenuMessageIds.remove(chatId);
