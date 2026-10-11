@@ -3,7 +3,7 @@ FROM maven:3.8.8-eclipse-temurin-17 AS build
 WORKDIR /app
 COPY pom.xml .
 COPY src ./src
-RUN mvn clean package -DskipTests
+RUN mvn package -DskipTests
 
 # Stage 2: Chạy ứng dụng từ file jar đã đóng gói
 FROM eclipse-temurin:17-jre
