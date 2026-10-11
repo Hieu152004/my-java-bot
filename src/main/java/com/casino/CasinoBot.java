@@ -499,6 +499,8 @@ public class CasinoBot extends TelegramLongPollingBot {
             joinXiLat(chatId, user, query.getId());
         } else if (data.equals("xl_deal")) {
             startXiLatDeal(chatId, user, query.getId());
+        } else if (data.equals("xl_view")) {
+            xiLatView(chatId, user, query.getId());
         } else if (data.equals("xl_hit")) {
             xiLatHit(chatId, user, query.getId());
         } else if (data.equals("xl_stand")) {
@@ -2494,7 +2496,34 @@ public class CasinoBot extends TelegramLongPollingBot {
     private boolean xiLatSpecial(List<Card> h, String type) { if(h.size()!=2)return false; boolean a=h.get(0).rank.equals("A"), b=h.get(1).rank.equals("A"); if(type.equals("bang")) return a&&b; return (a&&isTen(h.get(1)))||(b&&isTen(h.get(0))); }
     private boolean isTen(Card c){return c.rank.equals("10")||c.rank.equals("J")||c.rank.equals("Q")||c.rank.equals("K");}
     private boolean xiLatDone(XiLatGame g) { for(long id:g.order) if(!g.stood.contains(id) && xiLatPoints(g.hands.get(id))<=21 && !xiLatSpecial(g.hands.get(id),"bang") && !xiLatSpecial(g.hands.get(id),"dach")) return false; return true; }
-    private void xiLatHit(long chatId, User user, String q) { XiLatGame g=xilatGames.get(chatId); if(g==null||!g.dealt||g.revealing||!g.order.contains(user.getId())||g.stood.contains(user.getId())){answerAlert(q,"Bạn không thể rút bài lúc này.");return;} synchronized(g){List<Card> deck=buildRemainingDeck(g); if(deck.isEmpty()){answerAlert(q,"Không còn bài.");return;} g.hands.get(user.getId()).add(deck.get(0)); if(xiLatPoints(g.hands.get(user.getId()))>21||g.hands.get(user.getId()).size()>=5||xiLatSpecial(g.hands.get(user.getId()),"bang")||xiLatSpecial(g.hands.get(user.getId()),"dach")) g.stood.add(user.getId());} answerAlert(q,"Đã rút bài."); sendXiLatPlayMessage(chatId); if(xiLatDone(g)) beginXiLatDealer(chatId); }
+    private String xiLatPrivateHandAlert(List<Card> hand) {
+        StringBuilder cards = new StringBuilder();
+        for (Card card : hand) { if (cards.length() > 0) cards.append("  "); cards.append(card); }
+        int points = xiLatPoints(hand);
+        String kind = xiLatSpecial(hand, "bang") ? "Xì Bàng" : xiLatSpecial(hand, "dach") ? "Xì Dách" : hand.size() == 5 && points <= 21 ? "Ngũ Linh" : points > 21 ? "Quắc" : points + " điểm";
+        return "🃏 Bài của bạn: [ " + cards + " ]\n📊 Loại bài: " + kind + (points > 21 ? " — QUẮC!" : "");
+    }
+    private void xiLatView(long chatId, User user, String q) {
+        XiLatGame g = xilatGames.get(chatId);
+        if (g == null || !g.dealt || !g.order.contains(user.getId())) { answerAlert(q, "Bạn chưa có bài trong ván Xì Lát này."); return; }
+        List<Card> hand = g.hands.get(user.getId());
+        if (hand == null || hand.isEmpty()) { answerAlert(q, "Chưa tìm thấy bài của bạn."); return; }
+        answerAlert(q, xiLatPrivateHandAlert(hand));
+    }
+    private void xiLatHit(long chatId, User user, String q) {
+        XiLatGame g=xilatGames.get(chatId);
+        if(g==null||!g.dealt||g.revealing||!g.order.contains(user.getId())||g.stood.contains(user.getId())){answerAlert(q,"Bạn không thể rút bài lúc này.");return;}
+        synchronized(g){
+            List<Card> deck=buildRemainingDeck(g);
+            if(deck.isEmpty()){answerAlert(q,"Không còn bài.");return;}
+            g.hands.get(user.getId()).add(deck.get(0));
+            int points = xiLatPoints(g.hands.get(user.getId()));
+            if(points>21||g.hands.get(user.getId()).size()>=5||xiLatSpecial(g.hands.get(user.getId()),"bang")||xiLatSpecial(g.hands.get(user.getId()),"dach")) g.stood.add(user.getId());
+        }
+        answerAlert(q, xiLatPrivateHandAlert(g.hands.get(user.getId())));
+        sendXiLatPlayMessage(chatId);
+        if(xiLatDone(g)) beginXiLatDealer(chatId);
+    }
     private List<Card> buildRemainingDeck(XiLatGame g){Set<String> used=new HashSet<>();for(List<Card> h:g.hands.values())for(Card c:h)used.add(c.toString());List<Card>d=new ArrayList<>();String[]r={"A","2","3","4","5","6","7","8","9","10","J","Q","K"};String[]s={"♠️","♣️","♦️","♥️"};for(String x:r)for(String y:s){Card c=new Card(x,y);if(!used.contains(c.toString()))d.add(c);}Collections.shuffle(d);return d;}
     private void xiLatStand(long chatId, User user, String q) {
         XiLatGame g=xilatGames.get(chatId);
@@ -2507,7 +2536,20 @@ public class CasinoBot extends TelegramLongPollingBot {
         sendXiLatPlayMessage(chatId);
         if(xiLatDone(g)) beginXiLatDealer(chatId);
     }
-    private void sendXiLatPlayMessage(long chatId){XiLatGame g=xilatGames.get(chatId);if(g==null)return;StringBuilder b=new StringBuilder("♠️ <b>XÌ LÁT — ĐANG CHƠI</b>\n\n");for(long id:g.order){b.append("• ").append(escapeHtml(g.names.get(id))).append(": ").append(g.stood.contains(id)?"🟢 Đã dằn":"🟡 Đang chơi").append("\n");}b.append("\n💰 Cược chính mỗi nhà: 5B\nBài riêng không hiển thị công khai trước khi khui.");InlineKeyboardMarkup kb=new InlineKeyboardMarkup(List.of(List.of(createBtn("🃏 RÚT BÀI","xl_hit"),createBtn("✋ DẰN BÀI","xl_stand")),List.of(createBtn("🤝 CƯỢC NGOÀI","xl_offer_menu"))));sendMessageWithMarkup(chatId,b.toString(),kb);}
+    private void sendXiLatPlayMessage(long chatId){
+        XiLatGame g=xilatGames.get(chatId); if(g==null)return;
+        StringBuilder b=new StringBuilder("♠️ <b>XÌ LÁT — ĐANG CHƠI</b>\n\n");
+        int index=1;
+        for(long id:g.order){
+            b.append(index++).append(". ").append(escapeHtml(g.names.get(id))).append(": ").append(g.stood.contains(id)?"🟢 Đã dằn chờ khui":"🟡 Đang chơi").append("\n");
+        }
+        b.append("\n💰 Cược chính mỗi nhà: 5B\nBài riêng không hiển thị công khai trước khi khui.");
+        InlineKeyboardMarkup kb=new InlineKeyboardMarkup(List.of(
+            List.of(createBtn("👁️ XEM BÀI","xl_view")),
+            List.of(createBtn("🃏 RÚT BÀI","xl_hit"),createBtn("✋ DẰN BÀI","xl_stand"))
+        ));
+        sendMessageWithMarkup(chatId,b.toString(),kb);
+    }
     private void beginXiLatDealer(long chatId){XiLatGame g=xilatGames.get(chatId);if(g==null||g.revealing)return;g.revealing=true;if(g.timer!=null)g.timer.cancel(false);List<Card> dealer=g.hands.get(g.dealerId);while(xiLatPoints(dealer)<16&&dealer.size()<5&&xiLatPoints(dealer)<=21){List<Card>d=buildRemainingDeck(g);if(d.isEmpty())break;dealer.add(d.get(0));}sendMessageWithMarkup(chatId,"🎩 Nhà cái đã hoàn tất bài. Bắt đầu khui và thanh toán từng nhà.",new InlineKeyboardMarkup(List.of(List.of(createBtn("👉 KHUI NHÀ TIẾP THEO","xl_reveal")))));scheduler.schedule(()->autoRevealXiLat(chatId,g),30,TimeUnit.SECONDS);}
     private void autoRevealXiLat(long chatId, XiLatGame g){if(xilatGames.get(chatId)!=g||g.finished)return;if(g.revealed.size()>=g.order.size()){finishXiLat(chatId,g);return;}revealNextXiLatHouse(chatId,null,null,true);scheduler.schedule(()->autoRevealXiLat(chatId,g),2,TimeUnit.SECONDS);}
     private int xiLatRank(List<Card> h){if(xiLatSpecial(h,"bang"))return 5;if(xiLatSpecial(h,"dach"))return 4;if(h.size()==5&&xiLatPoints(h)<=21)return 3;if(xiLatPoints(h)>21)return 0;return 1;}
