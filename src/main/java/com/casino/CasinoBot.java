@@ -2079,7 +2079,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         long remainder = amount % winners.size();
         for (int i = 0; i < winners.size(); i++) {
             long pay = each + (i < remainder ? 1 : 0);
-            winnings.put(winners.get(i), winners.getOrDefault(winners.get(i), 0L) + pay);
+            winnings.put(winners.get(i), winnings.getOrDefault(winners.get(i), 0L) + pay);
         }
     }
 
@@ -2543,7 +2543,6 @@ public class CasinoBot extends TelegramLongPollingBot {
         return "🃏 Bài của bạn: [ " + cards + " ]\n📊 Loại bài: " + kind + (points > 21 ? " — QUẮC!" : "");
     }
     
-    // FIX LỖI: Cho phép cả Dealer XEM BÀI của chính mình
     private void xiLatView(long chatId, User user, String q) {
         XiLatGame g = xilatGames.get(chatId);
         if (g == null || !g.dealt || (!g.order.contains(user.getId()) && user.getId() != g.dealerId)) { answerAlert(q, "Bạn chưa có bài trong ván Xì Lát này."); return; }
@@ -2600,7 +2599,6 @@ public class CasinoBot extends TelegramLongPollingBot {
         }
     }
 
-    // LƯỢT RÚT BÀI CỦA NHÀ CÁI
     private void startDealerTurn(long chatId) {
         XiLatGame g = xilatGames.get(chatId);
         if (g == null || g.dealerTurn || g.revealing) return;
@@ -2690,7 +2688,6 @@ public class CasinoBot extends TelegramLongPollingBot {
         beginXiLatDealerReveal(chatId);
     }
 
-    // CHUYỂN SANG BƯỚC KHUI BÀI
     private void beginXiLatDealerReveal(long chatId) {
         XiLatGame g = xilatGames.get(chatId);
         if (g == null || g.revealing) return;
@@ -2857,3 +2854,163 @@ public class CasinoBot extends TelegramLongPollingBot {
                 if(cmp == 0) {
                     Database.changeBalance(bet.offererId, bet.amount);
                     Database.changeBalance(bet.accepterId, bet.amount);
+                    b.append(idx++).append(": ").append(getMention(bet.offererId, bet.offererName))
+                     .append(": +0 điểm , ").append(getMention(bet.accepterId, bet.accepterName))
+                     .append(": +0 điểm\n");
+                } else if(cmp > 0) {
+                    Database.changeBalance(bet.offererId, bet.amount * 2);
+                    b.append(idx++).append(": ").append(getMention(bet.offererId, bet.offererName))
+                     .append(": +").append(formatDetailedMoney(bet.amount)).append(" điểm , ")
+                     .append(getMention(bet.accepterId, bet.accepterName))
+                     .append(": -").append(formatDetailedMoney(bet.amount)).append(" điểm\n");
+                } else {
+                    Database.changeBalance(bet.accepterId, bet.amount * 2);
+                    b.append(idx++).append(": ").append(getMention(bet.offererId, bet.offererName))
+                     .append(": -").append(formatDetailedMoney(bet.amount)).append(" điểm , ")
+                     .append(getMention(bet.accepterId, bet.accepterName))
+                     .append(": +").append(formatDetailedMoney(bet.amount)).append(" điểm\n");
+                }
+                bet.settled = true;
+            }
+        }
+
+        xilatGames.remove(chatId, g);
+        sendMessage(chatId, b.toString());
+        sendMainMenu(chatId);
+    }
+
+    private void offerXiLatSideBet(long chatId, User user, long amount, String q) {
+        XiLatGame g = xilatGames.get(chatId);
+        if (g == null || g.dealt) { answerAlert(q, "Cược ngoài chỉ tạo được trước khi chia bài."); return; }
+        if (Arrays.stream(XILAT_SIDE_BETS).noneMatch(v -> v == amount)) { answerAlert(q, "Mức cược không hợp lệ."); return; }
+        if (user.getId() != g.dealerId && !g.order.contains(user.getId())) { answerAlert(q, "Bạn cần tham gia bàn Xì Lát trước khi tạo cược ngoài."); return; }
+        if (Database.getBalance(user.getId()) < amount || !Database.tryChangeBalance(user.getId(), -amount)) { answerAlert(q, "Không đủ điểm để khóa kèo."); return; }
+        g.sideBets.add(new XiLatSideBet(user.getId(), displayName(user), amount));
+        answerAlert(q, "Đã tạo kèo ngoài " + formatShortMoney(amount) + "; chờ người nhận.");
+        
+        SendMessage msg = new SendMessage();
+        msg.setChatId(String.valueOf(chatId));
+        msg.setText("🤝 <b>" + escapeHtml(displayName(user)) + " muốn cược ngoài " + formatShortMoney(amount) + ".</b>");
+        msg.setParseMode("HTML");
+        msg.setReplyMarkup(new InlineKeyboardMarkup(List.of(List.of(createBtn("NHẬN KÈO", "xl_accept:" + (g.sideBets.size() - 1))))));
+        telegramExecutor.execute(() -> {
+            try {
+                Message sent = execute(msg);
+                g.tempMessageIds.add(sent.getMessageId());
+            } catch (Exception ignored) {}
+        });
+    }
+
+    private void acceptXiLatSideBet(long chatId, User user, int idx, String q) {
+        XiLatGame g = xilatGames.get(chatId);
+        if (g == null || g.dealt || idx < 0 || idx >= g.sideBets.size()) { answerAlert(q, "Kèo không còn khả dụng."); return; }
+        XiLatSideBet b = g.sideBets.get(idx);
+        if (b.accepterId != 0) { answerAlert(q, "Kèo này đã có người nhận rồi."); return; }
+        if (b.offererId == user.getId()) { answerAlert(q, "Bạn là người tạo kèo nên không thể tự nhận kèo của mình; hãy để người chơi khác nhận."); return; }
+        if (user.getId() != g.dealerId && !g.order.contains(user.getId())) { answerAlert(q, "Chỉ thành viên thuộc bàn mới được nhận kèo ngoài."); return; }
+        if (Database.getBalance(user.getId()) < b.amount || !Database.tryChangeBalance(user.getId(), -b.amount)) { answerAlert(q, "Không đủ điểm nhận kèo."); return; }
+        b.accepterId = user.getId(); b.accepterName = displayName(user); g.names.putIfAbsent(user.getId(), b.accepterName);
+        answerAlert(q, "Đã nhận kèo ngoài.");
+        
+        SendMessage msg = new SendMessage();
+        msg.setChatId(String.valueOf(chatId));
+        msg.setText("🤝 Kèo ngoài đã ghép: " + escapeHtml(b.offererName) + " vs " + escapeHtml(b.accepterName) + " — " + formatShortMoney(b.amount) + ".");
+        msg.setParseMode("HTML");
+        telegramExecutor.execute(() -> {
+            try {
+                Message sent = execute(msg);
+                g.tempMessageIds.add(sent.getMessageId());
+            } catch (Exception ignored) {}
+        });
+    }
+
+    private String escapeHtml(String s) {
+        if(s == null) return "Người chơi";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
+    }
+
+    private void sendMainMenu(long chatId) {
+        Integer oldMenuId = lastMenuMessageIds.remove(chatId);
+        if (oldMenuId != null) {
+            deleteMessage(chatId, oldMenuId);
+        }
+
+        SendMessage msg = new SendMessage();
+        msg.setChatId(String.valueOf(chatId));
+        msg.setText("🎰 <b>HỆ THỐNG GAME CASINO</b>\n\nChọn game muốn chơi bên dưới:");
+        msg.setParseMode("HTML");
+
+        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        rows.add(List.of(
+                createBtn("🎲 XÚC XẮC", "new_game"),
+                createBtn("🏺 BẦU CUA", "new_baucua")
+        ));
+        rows.add(List.of(
+                createBtn("🃏 BÀI TỐ", "bc_select_bet"),
+                createBtn("♠️ XÌ LÁT", "new_xilat")
+        ));
+        rows.add(List.of(
+                createBtn("💰 SỐ DƯ", "balance"),
+                createBtn("🏆 BẢNG XẾP HẠNG", "top")
+        ));
+        markup.setKeyboard(rows);
+        msg.setReplyMarkup(markup);
+
+        telegramExecutor.execute(() -> { 
+            try { 
+                Message sent = execute(msg); 
+                lastMenuMessageIds.put(chatId, sent.getMessageId());
+            } catch (Exception ignored) {} 
+        });
+    }
+
+    private void updateGameMessage(long chatId) {
+        DiceGame game = games.get(chatId);
+        if (game == null || game.messageId == null) return;
+
+        long elapsed = (System.currentTimeMillis() - game.startTime) / 1000;
+        int remaining = (int) (40 - elapsed);
+
+        EditMessageText edit = new EditMessageText();
+        edit.setChatId(String.valueOf(chatId));
+        edit.setMessageId(game.messageId);
+        edit.setText(getDiceGameText(game, remaining));
+        edit.setParseMode("HTML");
+        edit.setReplyMarkup((game.dealerId == null || game.dealerClaimingWindow) ? getDealerKeyboard() : getBettingKeyboard());
+
+        telegramExecutor.execute(() -> { try { execute(edit); } catch (Exception ignored) {} });
+    }
+
+    private InlineKeyboardMarkup getDealerKeyboard() {
+        return new InlineKeyboardMarkup(List.of(List.of(createBtn("👉 CẦM CÁI 👈", "take_dealer"))));
+    }
+
+    private InlineKeyboardMarkup getBettingKeyboard() {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        for (long amt : BET_AMOUNTS) {
+            rows.add(List.of(
+                    createBtn("🔴 Tài " + formatShortMoney(amt), "bet:T:" + amt),
+                    createBtn("🔵 Xỉu " + formatShortMoney(amt), "bet:X:" + amt)
+            ));
+        }
+        rows.add(List.of(createBtn("🎲 TUNG XÚC XẮC", "roll")));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    private InlineKeyboardButton createBtn(String text, String data) {
+        InlineKeyboardButton btn = new InlineKeyboardButton(text);
+        btn.setCallbackData(data);
+        return btn;
+    }
+
+    private void sendMessage(long chatId, String text) {
+        sendMessageWithMarkup(chatId, text, null);
+    }
+
+    private void sendMessageSync(long chatId, String text) {
+        SendMessage msg = new SendMessage();
+        msg.setChatId(String.valueOf(chatId));
+        msg.setText(text);
+        msg.setParseMode("HTML");
+        telegramExecutor.execute(() -> { try { execute(msg); } catch (Exception ignored) {} });
