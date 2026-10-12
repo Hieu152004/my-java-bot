@@ -2967,6 +2967,76 @@ public class CasinoBot extends TelegramLongPollingBot {
 
 
     // ===== Các hàm tiện ích Telegram bị thiếu =====
+
+    private void updateGameMessage(long chatId) {
+        DiceGame game = games.get(chatId);
+        if (game == null || game.messageId == null) return;
+
+        int remaining = 40 - (int) ((System.currentTimeMillis() - game.startTime) / 1000L);
+        EditMessageText edit = new EditMessageText();
+        edit.setChatId(String.valueOf(chatId));
+        edit.setMessageId(game.messageId);
+        edit.setText(getDiceGameText(game, Math.max(0, remaining)));
+        edit.setParseMode("HTML");
+        edit.setReplyMarkup((game.dealerId == null || game.dealerClaimingWindow)
+                ? getDealerKeyboard() : getBettingKeyboard());
+
+        telegramExecutor.execute(() -> {
+            try {
+                execute(edit);
+            } catch (TelegramApiException e) {
+                // Telegram trả lỗi "message is not modified" nếu nội dung không đổi; bỏ qua.
+                if (e.getMessage() == null || !e.getMessage().contains("message is not modified")) {
+                    System.err.println("[BOT] Không cập nhật được bàn Xúc Xắc: " + e.getMessage());
+                }
+            }
+        });
+    }
+
+    private void sendMessageWithMarkup(long chatId, String text, InlineKeyboardMarkup markup) {
+        SendMessage msg = new SendMessage();
+        msg.setChatId(String.valueOf(chatId));
+        msg.setText(text);
+        msg.setParseMode("HTML");
+        msg.setReplyMarkup(markup);
+        telegramExecutor.execute(() -> {
+            try {
+                execute(msg);
+            } catch (TelegramApiException e) {
+                System.err.println("[BOT] Không gửi được tin nhắn có nút: " + e.getMessage());
+            }
+        });
+    }
+
+    private long parseMoney(String raw) {
+        if (raw == null) return 0L;
+        String value = raw.trim().toUpperCase(java.util.Locale.ROOT)
+                .replace(",", "").replace(".", "").replace("_", "");
+        if (value.isEmpty()) return 0L;
+
+        try {
+            java.util.regex.Matcher matcher =
+                    java.util.regex.Pattern.compile("^([0-9]+(?:\\.[0-9]+)?)([KMB]?)$").matcher(raw.trim().toUpperCase(java.util.Locale.ROOT));
+            if (!matcher.matches()) {
+                // Dạng số nguyên đầy đủ như 50000000 hoặc có dấu phân tách hàng nghìn.
+                String digits = raw.trim().replace(".", "").replace(",", "").replace("_", "");
+                if (!digits.matches("[0-9]+")) return 0L;
+                return Long.parseLong(digits);
+            }
+            java.math.BigDecimal amount = new java.math.BigDecimal(matcher.group(1));
+            String suffix = matcher.group(2);
+            java.math.BigDecimal multiplier = switch (suffix) {
+                case "K" -> java.math.BigDecimal.valueOf(1_000L);
+                case "M" -> java.math.BigDecimal.valueOf(1_000_000L);
+                case "B" -> java.math.BigDecimal.valueOf(1_000_000_000L);
+                default -> java.math.BigDecimal.ONE;
+            };
+            return amount.multiply(multiplier).longValueExact();
+        } catch (ArithmeticException | NumberFormatException e) {
+            return 0L;
+        }
+    }
+
     private void sendMessage(long chatId, String text) {
         SendMessage msg = new SendMessage();
         msg.setChatId(String.valueOf(chatId));
