@@ -244,6 +244,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         Map<Long,String> names = new ConcurrentHashMap<>();
         Map<Long,List<Card>> hands = new ConcurrentHashMap<>();
         Set<Long> stood = ConcurrentHashMap.newKeySet(); Set<Long> revealed = ConcurrentHashMap.newKeySet();
+        Map<Long,Integer> standMessageIds = new ConcurrentHashMap<>();
         List<XiLatSideBet> sideBets = new CopyOnWriteArrayList<>();
         List<Integer> tempMessageIds = new CopyOnWriteArrayList<>();
         int revealIndex=0; long started=System.currentTimeMillis(); ScheduledFuture<?> timer;
@@ -2562,6 +2563,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             if(points>21||g.hands.get(user.getId()).size()>=5||xiLatSpecial(g.hands.get(user.getId()),"bang")||xiLatSpecial(g.hands.get(user.getId()),"dach")) g.stood.add(user.getId());
         }
         answerAlert(q, xiLatPrivateHandAlert(g.hands.get(user.getId())));
+        if (g.stood.contains(user.getId()) && !g.revealed.contains(user.getId())) sendXiLatStandPrompt(chatId, g, user.getId());
         sendXiLatPlayMessage(chatId);
         if(xiLatDone(g)) startDealerTurn(chatId);
     }
@@ -2570,10 +2572,37 @@ public class CasinoBot extends TelegramLongPollingBot {
         XiLatGame g=xilatGames.get(chatId);
         if(g==null||!g.dealt||g.dealerTurn||g.revealing||!g.order.contains(user.getId())||g.stood.contains(user.getId())){answerAlert(q,"Bạn không thể dằn bài lúc này.");return;}
         g.stood.add(user.getId());
-        answerAlert(q,"Đã dằn bài.");
-        
+        answerAlert(q,"Đã dằn bài. Nhà cái có thể bấm KHUI NHÀ để khui và tính tiền ngay.");
+        sendXiLatStandPrompt(chatId, g, user.getId());
         sendXiLatPlayMessage(chatId);
         if(xiLatDone(g)) startDealerTurn(chatId);
+    }
+
+    private void sendXiLatStandPrompt(long chatId, XiLatGame g, long playerId) {
+        if (g == null || g.finished || g.revealed.contains(playerId)) return;
+        Integer oldId = g.standMessageIds.remove(playerId);
+        if (oldId != null) deleteMessage(chatId, oldId);
+        String name = g.names.getOrDefault(playerId, "Người chơi");
+        SendMessage msg = new SendMessage();
+        msg.setChatId(String.valueOf(chatId));
+        msg.setText("✋ <b>" + escapeHtml(name) + " đã dằn bài.</b>\\nNhà cái có thể bấm nút bên dưới để khui và tính tiền ngay:");
+        msg.setParseMode("HTML");
+        msg.setReplyMarkup(new InlineKeyboardMarkup(List.of(
+            List.of(createBtn("🃏 KHUI NHÀ [" + name + "]", "xl_reveal:" + playerId))
+        )));
+        telegramExecutor.execute(() -> {
+            try {
+                Message sent = execute(msg);
+                if (xilatGames.get(chatId) == g && !g.revealed.contains(playerId)) {
+                    g.standMessageIds.put(playerId, sent.getMessageId());
+                    g.tempMessageIds.add(sent.getMessageId());
+                } else {
+                    deleteMessage(chatId, sent.getMessageId());
+                }
+            } catch (Exception ex) {
+                System.err.println("[XILAT] send stand prompt: " + ex.getMessage());
+            }
+        });
     }
 
     private void sendXiLatPlayMessage(long chatId){
@@ -2692,6 +2721,10 @@ public class CasinoBot extends TelegramLongPollingBot {
         XiLatGame g = xilatGames.get(chatId);
         if (g == null || g.revealing) return;
         g.revealing = true;
+        if (g.revealed.size() >= g.order.size()) {
+            finishXiLat(chatId, g);
+            return;
+        }
 
         if (g.playMessageId != null) {
             deleteMessage(chatId, g.playMessageId);
@@ -2703,7 +2736,10 @@ public class CasinoBot extends TelegramLongPollingBot {
     }
 
     private void sendRevealControlMenu(long chatId) {
-        XiLatGame g = xilatGames.get(chatId);
+        sendRevealControlMenu(chatId, xilatGames.get(chatId));
+    }
+
+    private void sendRevealControlMenu(long chatId, XiLatGame g) {
         if (g == null || g.finished) return;
 
         StringBuilder sb = new StringBuilder();
@@ -2763,7 +2799,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         XiLatGame g=xilatGames.get(chatId);
         if(g==null||g.finished){if(q!=null)answerAlert(q,"Ván Xì Lát đã kết thúc.");return;}
         if(!auto&&(user==null||user.getId()!=g.dealerId)){answerAlert(q,"Chỉ nhà cái được khui bài.");return;}
-        if(!g.revealing){if(q!=null)answerAlert(q,"Chờ nhà cái dằn bài xong mới bắt đầu khui được.");return;}
+        if (!g.stood.contains(playerId)) { if(q!=null)answerAlert(q,"Nhà này chưa dằn bài, chưa thể khui."); return; }
         String resultMessage;
         synchronized(g){
             if(g.revealed.contains(playerId)){if(q!=null)answerAlert(q,"Nhà này đã khui và tính tiền rồi.");return;}
@@ -2775,6 +2811,11 @@ public class CasinoBot extends TelegramLongPollingBot {
             long net=win?XILAT_BET:tie?0:-XILAT_BET;
             if(pr==0)net=-XILAT_BET; if(dr==0&&pr>0)net=XILAT_BET;
             g.revealed.add(playerId);
+            Integer standMessageId = g.standMessageIds.remove(playerId);
+            if (standMessageId != null) {
+                deleteMessage(chatId, standMessageId);
+                g.tempMessageIds.remove(standMessageId);
+            }
             if(net>0){Database.changeBalance(g.dealerId,-XILAT_BET);Database.changeBalance(playerId,XILAT_BET*2);}
             else if(net==0){Database.changeBalance(playerId,XILAT_BET);}
             else {Database.changeBalance(g.dealerId,XILAT_BET);}
@@ -2794,10 +2835,8 @@ public class CasinoBot extends TelegramLongPollingBot {
             } catch (Exception ignored) {}
         });
 
-        if(g.revealed.size()>=g.order.size()) finishXiLat(chatId,g);
-        else {
-            sendRevealControlMenu(chatId);
-        }
+        if (g.revealing && g.revealed.size() >= g.order.size()) finishXiLat(chatId, g);
+        else if (g.revealing) sendRevealControlMenu(chatId, g);
     }
 
     private void finishXiLat(long chatId, XiLatGame g) {
