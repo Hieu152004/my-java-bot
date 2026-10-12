@@ -2914,8 +2914,21 @@ public class CasinoBot extends TelegramLongPollingBot {
         }
 
         xilatGames.remove(chatId, g);
-        sendMessage(chatId, b.toString());
-        sendMainMenu(chatId);
+
+        // Gửi kết quả xong mới hiện menu để tránh menu chen lên trước kết quả.
+        SendMessage resultMsg = new SendMessage();
+        resultMsg.setChatId(String.valueOf(chatId));
+        resultMsg.setText(b.toString());
+        resultMsg.setParseMode("HTML");
+        telegramExecutor.execute(() -> {
+            try {
+                execute(resultMsg);
+            } catch (TelegramApiException e) {
+                System.err.println("[XILAT] Không gửi được kết quả ván: " + e.getMessage());
+            } finally {
+                sendMainMenu(chatId);
+            }
+        });
     }
 
     private void offerXiLatSideBet(long chatId, User user, long amount, String q) {
