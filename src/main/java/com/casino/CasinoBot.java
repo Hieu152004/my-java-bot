@@ -235,7 +235,7 @@ public class CasinoBot extends TelegramLongPollingBot {
     private static final long[] XILAT_SIDE_BETS = {1_000_000_000L, 10_000_000_000L, 20_000_000_000L, 50_000_000_000L, 100_000_000_000L, 200_000_000_000L};
 
     private static class XiLatSideBet {
-        long offererId; String offererName; long accepterId; String accepterName; long amount; boolean settled;
+        long offererId; String offererName; long accepterId; String accepterName; long amount; boolean settled; Integer messageId;
         XiLatSideBet(long offererId, String offererName, long amount) { this.offererId=offererId; this.offererName=offererName; this.amount=amount; }
     }
     private static class XiLatGame {
@@ -2897,6 +2897,8 @@ public class CasinoBot extends TelegramLongPollingBot {
             try {
                 Message sent = execute(msg);
                 g.tempMessageIds.add(sent.getMessageId());
+                XiLatSideBet createdBet = g.sideBets.get(g.sideBets.size() - 1);
+                createdBet.messageId = sent.getMessageId();
             } catch (Exception ignored) {}
         });
     }
@@ -2910,6 +2912,11 @@ public class CasinoBot extends TelegramLongPollingBot {
         if (user.getId() != g.dealerId && !g.order.contains(user.getId())) { answerAlert(q, "Chỉ thành viên thuộc bàn mới được nhận kèo ngoài."); return; }
         if (Database.getBalance(user.getId()) < b.amount || !Database.tryChangeBalance(user.getId(), -b.amount)) { answerAlert(q, "Không đủ điểm nhận kèo."); return; }
         b.accepterId = user.getId(); b.accepterName = displayName(user); g.names.putIfAbsent(user.getId(), b.accepterName);
+        if (b.messageId != null) {
+            deleteMessage(chatId, b.messageId);
+            g.tempMessageIds.remove(b.messageId);
+            b.messageId = null;
+        }
         answerAlert(q, "Đã nhận kèo ngoài.");
         
         SendMessage msg = new SendMessage();
