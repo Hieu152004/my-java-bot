@@ -608,9 +608,9 @@ public class CasinoBot extends TelegramLongPollingBot {
             claimLixi(chatId, user, query.getId(), msg);
         } else if (data.equals("balance")) {
             long bal = Database.getBalance(user.getId());
-            answerAlert(queryId, "Điểm hiện tại của bạn là: " + formatDetailedMoney(bal) + " đ.");
+            answerAlert(query.getId(), "Điểm hiện tại của bạn là: " + formatDetailedMoney(bal) + " đ.");
         } else if (data.equals("top")) {
-            answerAlert(queryId, "📊 Đang tải bảng xếp hạng...");
+            answerAlert(query.getId(), "📊 Đang tải bảng xếp hạng...");
             long[] admins = ADMIN_IDS.stream().mapToLong(l -> l).toArray();
             telegramExecutor.execute(() -> {
                 String top = Database.getTopText(admins);
@@ -2963,6 +2963,104 @@ public class CasinoBot extends TelegramLongPollingBot {
                 lastMenuMessageIds.put(chatId, sent.getMessageId());
             } catch (Exception ignored) {}
         });
+    }
+
+
+    // ===== Các hàm tiện ích Telegram bị thiếu =====
+    private void sendMessage(long chatId, String text) {
+        SendMessage msg = new SendMessage();
+        msg.setChatId(String.valueOf(chatId));
+        msg.setText(text);
+        msg.setParseMode("HTML");
+        telegramExecutor.execute(() -> {
+            try {
+                execute(msg);
+            } catch (TelegramApiException e) {
+                System.err.println("[BOT] Không gửi được tin nhắn: " + e.getMessage());
+            }
+        });
+    }
+
+    private void sendMessageSync(long chatId, String text) {
+        SendMessage msg = new SendMessage();
+        msg.setChatId(String.valueOf(chatId));
+        msg.setText(text);
+        msg.setParseMode("HTML");
+        try {
+            execute(msg);
+        } catch (TelegramApiException e) {
+            System.err.println("[BOT] Không gửi được tin nhắn: " + e.getMessage());
+        }
+    }
+
+    private void deleteMessage(long chatId, Integer messageId) {
+        if (messageId == null) return;
+        DeleteMessage request = new DeleteMessage();
+        request.setChatId(String.valueOf(chatId));
+        request.setMessageId(messageId);
+        telegramExecutor.execute(() -> {
+            try {
+                execute(request);
+            } catch (TelegramApiException e) {
+                System.err.println("[BOT] Không xóa được tin nhắn: " + e.getMessage());
+            }
+        });
+    }
+
+    private void answerAlert(String queryId, String text) {
+        if (queryId == null || queryId.isBlank()) return;
+        AnswerCallbackQuery answer = new AnswerCallbackQuery();
+        answer.setCallbackQueryId(queryId);
+        answer.setText(text);
+        answer.setShowAlert(true);
+        telegramExecutor.execute(() -> {
+            try {
+                execute(answer);
+            } catch (TelegramApiException e) {
+                System.err.println("[BOT] Không trả lời được callback: " + e.getMessage());
+            }
+        });
+    }
+
+    private String formatDetailedMoney(long amount) {
+        return String.format(java.util.Locale.US, "%,d", amount).replace(',', '.');
+    }
+
+    private String formatShortMoney(long amount) {
+        if (amount >= 1_000_000_000L) {
+            return compactMoney(amount / 1_000_000_000.0, "B");
+        }
+        if (amount >= 1_000_000L) {
+            return compactMoney(amount / 1_000_000.0, "M");
+        }
+        if (amount >= 1_000L) {
+            return compactMoney(amount / 1_000.0, "K");
+        }
+        return String.valueOf(amount);
+    }
+
+    private String compactMoney(double value, String suffix) {
+        java.text.DecimalFormat df = new java.text.DecimalFormat("0.##",
+                java.text.DecimalFormatSymbols.getInstance(java.util.Locale.US));
+        return df.format(value) + suffix;
+    }
+
+    private InlineKeyboardMarkup getDealerKeyboard() {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        rows.add(List.of(createBtn("👑 CẦM CÁI", "take_dealer")));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    private InlineKeyboardMarkup getBettingKeyboard() {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        for (long amount : BET_AMOUNTS) {
+            rows.add(List.of(
+                    createBtn("🔴 TÀI " + formatShortMoney(amount), "bet:T:" + amount),
+                    createBtn("🔵 XỈU " + formatShortMoney(amount), "bet:X:" + amount)
+            ));
+        }
+        rows.add(List.of(createBtn("🎲 TUNG XÚC XẮC", "roll")));
+        return new InlineKeyboardMarkup(rows);
     }
 
     private InlineKeyboardButton createBtn(String text, String callbackData) {
