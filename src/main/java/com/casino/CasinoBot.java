@@ -2965,3 +2965,9 @@ public class CasinoBot extends TelegramLongPollingBot {
         });
     }
 }
+private InlineKeyboardButton createBtn(String text, String callbackData) {
+    InlineKeyboardButton button = new InlineKeyboardButton();
+    button.setText(text);
+    button.setCallbackData(callbackData);
+    return button;
+}
