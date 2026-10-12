@@ -2957,16 +2957,18 @@ public class CasinoBot extends TelegramLongPollingBot {
         markup.setKeyboard(rows);
         msg.setReplyMarkup(markup);
 
-        telegramExecutor.execute(() -> { 
-            try { 
-                Message sent = execute(msg); 
+                telegramExecutor.execute(() -> {
+            try {
+                Message sent = execute(msg);
                 lastMenuMessageIds.put(chatId, sent.getMessageId());
-            } catch (Exception ignored) {} 
+            } catch (Exception ignored) {}
         });
+    }
+
     private InlineKeyboardButton createBtn(String text, String callbackData) {
-    InlineKeyboardButton button = new InlineKeyboardButton();
-    button.setText(text);
-    button.setCallbackData(callbackData);
-    return button;
+        InlineKeyboardButton button = new InlineKeyboardButton();
+        button.setText(text);
+        button.setCallbackData(callbackData);
+        return button;
     }
 }
