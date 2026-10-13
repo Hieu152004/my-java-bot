@@ -1585,7 +1585,10 @@ public class CasinoBot extends TelegramLongPollingBot {
         edit.setParseMode("HTML");
         edit.setReplyMarkup(getBaiCaoPlayingKeyboard(game));
 
-        telegramExecutor.execute(() -> { try { execute(edit); } catch (Exception ignored) {} });
+        telegramExecutor.execute(() -> {
+            try { execute(edit); }
+            catch (Exception e) { System.err.println("[BAITO] Không cập nhật được menu đang chơi chat=" + chatId + ": " + e.getMessage()); }
+        });
     }
 
     private void updateBaiCaoTurnTimer(long chatId, long expectedTurnVersion) {
@@ -2022,8 +2025,9 @@ public class CasinoBot extends TelegramLongPollingBot {
                       .append(statusNote);
             }
 
+            // Chưa xóa menu đang chơi tại đây. Chỉ xóa sau khi gửi/đổi menu sang kết quả,
+            // tránh trường hợp Telegram từ chối gửi kết quả khiến nhóm mất luôn bàn chơi.
             baicaoGames.remove(chatId, game);
-            if (game.messageId != null) deleteMessage(chatId, game.messageId);
             if (game.lastTagMessageId != null) deleteMessage(chatId, game.lastTagMessageId);
 
             SendMessage resultMessage = new SendMessage();
@@ -2049,10 +2053,30 @@ public class CasinoBot extends TelegramLongPollingBot {
                         System.err.println("Không gửi được kết quả Bài Tố chat=" + chatId + ": " + fallbackError.getMessage());
                     }
                 }
+                boolean resultInExistingMenu = false;
+                if (!resultSent && game.messageId != null) {
+                    // Nếu cả hai lần gửi tin nhắn mới đều lỗi, chuyển chính menu đang chơi
+                    // thành bảng kết quả để người chơi không bị mất giao diện.
+                    try {
+                        EditMessageText editResult = new EditMessageText();
+                        editResult.setChatId(String.valueOf(chatId));
+                        editResult.setMessageId(game.messageId);
+                        editResult.setText(winMsg.toString());
+                        editResult.setParseMode("HTML");
+                        execute(editResult);
+                        resultInExistingMenu = true;
+                        resultSent = true;
+                    } catch (Exception editError) {
+                        System.err.println("Không thể chuyển menu Bài Tố thành kết quả chat=" + chatId + ": " + editError.getMessage());
+                    }
+                }
                 if (resultSent) {
                     try { Thread.sleep(1200); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-                    sendMainMenu(chatId);
                 }
+                if (!resultInExistingMenu && game.messageId != null) deleteMessage(chatId, game.messageId);
+                if (game.lastTagMessageId != null) deleteMessage(chatId, game.lastTagMessageId);
+                // Luôn mở lại menu chính, kể cả khi Telegram không nhận tin nhắn kết quả.
+                sendMainMenu(chatId);
             });
         }
     }
