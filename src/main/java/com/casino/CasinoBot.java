@@ -2405,11 +2405,17 @@ public class CasinoBot extends TelegramLongPollingBot {
             return;
         }
 
-        String[] parts = message.getText().split(" ");
-        if (parts.length < 2) return;
+        String[] parts = message.getText().trim().split("\\s+");
+        if (parts.length < 2) {
+            sendMessage(message.getChatId(), "⚠️ Cú pháp: trả lời tin nhắn người nhận rồi nhập /ckd <b>số tiền</b>. Ví dụ: /ckd 500B hoặc /ckd 1T");
+            return;
+        }
 
         long amount = parseMoney(parts[1]);
-        if (amount <= 0) return;
+        if (amount <= 0) {
+            sendMessage(message.getChatId(), "❌ Số tiền không hợp lệ hoặc vượt giới hạn hệ thống. Ví dụ: /ckd 500B hoặc /ckd 1T");
+            return;
+        }
 
         long senderId = message.getFrom().getId();
         long receiverId = message.getReplyToMessage().getFrom().getId();
@@ -2456,9 +2462,16 @@ public class CasinoBot extends TelegramLongPollingBot {
 
     private void handleTru(Message message) {
         if (message.getReplyToMessage() == null) return;
-        String[] parts = message.getText().split(" ");
-        if (parts.length < 2) return;
+        String[] parts = message.getText().trim().split("\\s+");
+        if (parts.length < 2) {
+            sendMessage(message.getChatId(), "⚠️ Cú pháp: trả lời tin nhắn người cần trừ điểm rồi nhập /tru <b>số tiền</b>.");
+            return;
+        }
         long amount = parseMoney(parts[1]);
+        if (amount <= 0) {
+            sendMessage(message.getChatId(), "❌ Số tiền không hợp lệ. Ví dụ: /tru 500B hoặc /tru 1T");
+            return;
+        }
         long targetId = message.getReplyToMessage().getFrom().getId();
 
         Database.changeBalance(targetId, -amount);
@@ -3069,28 +3082,29 @@ public class CasinoBot extends TelegramLongPollingBot {
 
     private long parseMoney(String raw) {
         if (raw == null) return 0L;
-        String value = raw.trim().toUpperCase(java.util.Locale.ROOT)
-                .replace(",", "").replace(".", "").replace("_", "");
-        if (value.isEmpty()) return 0L;
+        String input = raw.trim().toUpperCase(java.util.Locale.ROOT);
+        if (input.isEmpty()) return 0L;
 
         try {
-            java.util.regex.Matcher matcher =
-                    java.util.regex.Pattern.compile("^([0-9]+(?:\\.[0-9]+)?)([KMB]?)$").matcher(raw.trim().toUpperCase(java.util.Locale.ROOT));
-            if (!matcher.matches()) {
-                // Dạng số nguyên đầy đủ như 50000000 hoặc có dấu phân tách hàng nghìn.
-                String digits = raw.trim().replace(".", "").replace(",", "").replace("_", "");
-                if (!digits.matches("[0-9]+")) return 0L;
-                return Long.parseLong(digits);
+            java.util.regex.Matcher matcher = java.util.regex.Pattern
+                    .compile("^([0-9]+(?:\\.[0-9]+)?)([KMBT]?)$")
+                    .matcher(input);
+            if (matcher.matches() && !matcher.group(2).isEmpty()) {
+                java.math.BigDecimal amount = new java.math.BigDecimal(matcher.group(1));
+                java.math.BigDecimal multiplier = switch (matcher.group(2)) {
+                    case "K" -> java.math.BigDecimal.valueOf(1_000L);
+                    case "M" -> java.math.BigDecimal.valueOf(1_000_000L);
+                    case "B" -> java.math.BigDecimal.valueOf(1_000_000_000L);
+                    case "T" -> java.math.BigDecimal.valueOf(1_000_000_000_000L);
+                    default -> java.math.BigDecimal.ONE;
+                };
+                return amount.multiply(multiplier).longValueExact();
             }
-            java.math.BigDecimal amount = new java.math.BigDecimal(matcher.group(1));
-            String suffix = matcher.group(2);
-            java.math.BigDecimal multiplier = switch (suffix) {
-                case "K" -> java.math.BigDecimal.valueOf(1_000L);
-                case "M" -> java.math.BigDecimal.valueOf(1_000_000L);
-                case "B" -> java.math.BigDecimal.valueOf(1_000_000_000L);
-                default -> java.math.BigDecimal.ONE;
-            };
-            return amount.multiply(multiplier).longValueExact();
+
+            // Số nguyên đầy đủ; chấp nhận dấu phân tách hàng nghìn dạng 1,000 / 1.000 / 1_000.
+            String digits = input.replace(",", "").replace(".", "").replace("_", "");
+            if (!digits.matches("[0-9]+")) return 0L;
+            return Long.parseLong(digits);
         } catch (ArithmeticException | NumberFormatException e) {
             return 0L;
         }
