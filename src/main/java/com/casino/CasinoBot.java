@@ -2849,14 +2849,41 @@ public class CasinoBot extends TelegramLongPollingBot {
         });
     }
 
-    private void autoRevealXiLat(long chatId, XiLatGame g){
-        if(xilatGames.get(chatId)!=g||g.finished)return;
-        if(g.revealed.size()>=g.order.size()){
-            finishXiLat(chatId,g);
-            return;
+    private void autoRevealXiLat(long chatId, XiLatGame g) {
+        // Chỉ xử lý đúng phiên ván hiện tại; không để timer cũ tác động ván mới.
+        if (xilatGames.get(chatId) != g || g.finished || !g.revealing) return;
+
+        synchronized (g) {
+            // Người chưa dằn bài không thể khui. Khi hết thời gian khui, tự bỏ lượt,
+            // hoàn lại tiền cược chính và đánh dấu đã xử lý để không kẹt ván vô hạn.
+            for (Long pid : g.order) {
+                if (!g.revealed.contains(pid) && !g.stood.contains(pid)) {
+                    g.revealed.add(pid);
+                    Database.changeBalance(pid, XILAT_BET);
+                    Integer standMessageId = g.standMessageIds.remove(pid);
+                    if (standMessageId != null) {
+                        deleteMessage(chatId, standMessageId);
+                        g.tempMessageIds.remove(standMessageId);
+                    }
+                    sendMessage(chatId, "⏱️ <b>" + escapeHtml(g.names.getOrDefault(pid, "Người chơi"))
+                            + " chưa dằn bài nên bị bỏ lượt; đã hoàn cược 5B.</b>");
+                }
+            }
+            while (g.revealIndex < g.order.size()
+                    && (g.revealed.contains(g.order.get(g.revealIndex))
+                        || !g.stood.contains(g.order.get(g.revealIndex)))) {
+                g.revealIndex++;
+            }
+            if (g.revealed.size() >= g.order.size()) {
+                finishXiLat(chatId, g);
+                return;
+            }
         }
-        revealNextXiLatHouse(chatId,null,null,true);
-        scheduler.schedule(()->autoRevealXiLat(chatId,g),2,TimeUnit.SECONDS);
+
+        revealNextXiLatHouse(chatId, null, null, true);
+        if (xilatGames.get(chatId) == g && !g.finished) {
+            scheduler.schedule(() -> autoRevealXiLat(chatId, g), 2, TimeUnit.SECONDS);
+        }
     }
 
     private int xiLatRank(List<Card> h){if(xiLatSpecial(h,"bang"))return 5;if(xiLatSpecial(h,"dach"))return 4;if(h.size()==5&&xiLatPoints(h)<=21)return 3;if(xiLatPoints(h)>21)return 0;return 1;}
@@ -2868,8 +2895,21 @@ public class CasinoBot extends TelegramLongPollingBot {
         if(!auto&&(user==null||user.getId()!=g.dealerId)){answerAlert(q,"Chỉ nhà cái được khui bài.");return;}
         long target=0;
         synchronized(g){
-            while(g.revealIndex<g.order.size()&&g.revealed.contains(g.order.get(g.revealIndex)))g.revealIndex++;
-            if(g.revealIndex<g.order.size()) target=g.order.get(g.revealIndex);
+            while (g.revealIndex < g.order.size()
+                    && (g.revealed.contains(g.order.get(g.revealIndex))
+                        || !g.stood.contains(g.order.get(g.revealIndex)))) {
+                g.revealIndex++;
+            }
+            if (g.revealIndex < g.order.size()) target = g.order.get(g.revealIndex);
+            else {
+                // Không còn nhà nào đủ điều kiện khui; tránh vòng lặp vô hạn.
+                for (Long pid : g.order) {
+                    if (!g.revealed.contains(pid) && !g.stood.contains(pid)) {
+                        g.revealed.add(pid);
+                        Database.changeBalance(pid, XILAT_BET);
+                    }
+                }
+            }
         }
         if(target==0){finishXiLat(chatId,g);return;}
         revealXiLatHouse(chatId,user,target,q,auto);
@@ -2915,8 +2955,17 @@ public class CasinoBot extends TelegramLongPollingBot {
             } catch (Exception ignored) {}
         });
 
-        if (g.revealing && g.revealed.size() >= g.order.size()) finishXiLat(chatId, g);
-        else if (g.revealing) sendRevealControlMenu(chatId, g);
+        if (g.revealing) {
+            boolean allResolved = true;
+            for (Long pid : g.order) {
+                if (!g.revealed.contains(pid) && g.stood.contains(pid)) {
+                    allResolved = false;
+                    break;
+                }
+            }
+            if (allResolved) finishXiLat(chatId, g);
+            else sendRevealControlMenu(chatId, g);
+        }
     }
 
     private void finishXiLat(long chatId, XiLatGame g) {
