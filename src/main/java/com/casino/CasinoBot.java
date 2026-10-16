@@ -139,6 +139,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         long dealerBalance = 0;
         boolean dealerClaimingWindow = false;
         ScheduledFuture<?> dealerClaimTask = null;
+        ScheduledFuture<?> noDealerTimeoutTask = null;
         Map<Long, Bet> bets = new ConcurrentHashMap<>();
         Integer messageId = null;
         boolean rolling = false;
@@ -152,6 +153,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         long dealerBalance = 0;
         boolean dealerClaimingWindow = false;
         ScheduledFuture<?> dealerClaimTask = null;
+        ScheduledFuture<?> noDealerTimeoutTask = null;
         Map<Long, List<BauCuaBet>> bets = new ConcurrentHashMap<>();
         Integer messageId = null;
         boolean rolling = false;
@@ -247,7 +249,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         Map<Long,Integer> standMessageIds = new ConcurrentHashMap<>();
         List<XiLatSideBet> sideBets = new CopyOnWriteArrayList<>();
         List<Integer> tempMessageIds = new CopyOnWriteArrayList<>();
-        int revealIndex=0; long started=System.currentTimeMillis(); ScheduledFuture<?> timer;
+        int revealIndex=0; long started=System.currentTimeMillis(); ScheduledFuture<?> timer; ScheduledFuture<?> noDealerTimeoutTask;
     }
 
     private static class BaiCaoGame {
@@ -432,6 +434,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             if (g != null) {
                 if (g.countdownTask != null) g.countdownTask.cancel(true);
                 if (g.dealerClaimTask != null) g.dealerClaimTask.cancel(true);
+                if (g.noDealerTimeoutTask != null) g.noDealerTimeoutTask.cancel(true);
                 for (Bet b : g.bets.values()) {
                     Database.changeBalance(b.userId, b.amount);
                 }
@@ -442,6 +445,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             if (bcua != null) {
                 if (bcua.countdownTask != null) bcua.countdownTask.cancel(true);
                 if (bcua.dealerClaimTask != null) bcua.dealerClaimTask.cancel(true);
+                if (bcua.noDealerTimeoutTask != null) bcua.noDealerTimeoutTask.cancel(true);
                 for (List<BauCuaBet> list : bcua.bets.values()) {
                     for (BauCuaBet b : list) {
                         Database.changeBalance(b.userId, b.amount);
@@ -646,6 +650,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             try {
                 Message sent = execute(msg);
                 game.messageId = sent.getMessageId();
+                game.noDealerTimeoutTask = scheduler.schedule(() -> cancelIfNoBauCuaDealer(chatId, game), 30, TimeUnit.SECONDS);
             } catch (Exception e) {
                 baucuaGames.remove(chatId, game);
                 System.err.println("[BOT] Không gửi được menu Bầu Cua: " + e.getMessage());
@@ -777,6 +782,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         }
 
         if (game.dealerId == null) {
+            if (game.noDealerTimeoutTask != null) game.noDealerTimeoutTask.cancel(false);
             game.dealerId = user.getId();
             game.dealerName = user.getFirstName();
             game.dealerBalance = bal;
@@ -1185,6 +1191,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             try {
                 Message sent = execute(msg);
                 game.messageId = sent.getMessageId();
+                game.noDealerTimeoutTask = scheduler.schedule(() -> cancelIfNoDiceDealer(chatId, game), 30, TimeUnit.SECONDS);
             } catch (Exception e) {
                 games.remove(chatId, game);
                 System.err.println("[BOT] Không gửi được menu Xúc Xắc: " + e.getMessage());
@@ -2150,6 +2157,40 @@ public class CasinoBot extends TelegramLongPollingBot {
         return new HandScore(1, score, c3.suitValue, score + " điểm");
     }
 
+    // Hủy sảnh nếu hết 30 giây mà chưa có ai nhận cầm cái. Dùng remove(key,value)
+    // để timeout cũ không thể xóa nhầm một ván mới vừa được tạo.
+    private void cancelIfNoDiceDealer(long chatId, DiceGame game) {
+        synchronized (game) {
+            if (game.dealerId != null || !games.remove(chatId, game)) return;
+            if (game.countdownTask != null) game.countdownTask.cancel(false);
+            if (game.dealerClaimTask != null) game.dealerClaimTask.cancel(false);
+            if (game.messageId != null) deleteMessage(chatId, game.messageId);
+        }
+        sendMessage(chatId, "⌛ <b>Đã hủy ván Xúc Xắc</b> vì quá 30 giây không ai cầm cái. Menu đã được mở lại.");
+        sendMainMenu(chatId);
+    }
+
+    private void cancelIfNoBauCuaDealer(long chatId, BauCuaGame game) {
+        synchronized (game) {
+            if (game.dealerId != null || !baucuaGames.remove(chatId, game)) return;
+            if (game.countdownTask != null) game.countdownTask.cancel(false);
+            if (game.dealerClaimTask != null) game.dealerClaimTask.cancel(false);
+            if (game.messageId != null) deleteMessage(chatId, game.messageId);
+        }
+        sendMessage(chatId, "⌛ <b>Đã hủy ván Bầu Cua</b> vì quá 30 giây không ai cầm cái. Menu đã được mở lại.");
+        sendMainMenu(chatId);
+    }
+
+    private void cancelIfNoXiLatDealer(long chatId, XiLatGame game) {
+        synchronized (game) {
+            if (game.dealerId != 0 || game.dealt || !xilatGames.remove(chatId, game)) return;
+            if (game.timer != null) game.timer.cancel(false);
+            if (game.messageId != null) deleteMessage(chatId, game.messageId);
+        }
+        sendMessage(chatId, "⌛ <b>Đã hủy bàn Xì Lát</b> vì quá 30 giây không ai nhận làm nhà cái. Menu đã được mở lại.");
+        sendMainMenu(chatId);
+    }
+
     private void takeDealer(long chatId, User user, String queryId) {
         DiceGame game = games.get(chatId);
         if (game == null) {
@@ -2164,6 +2205,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         }
 
         if (game.dealerId == null) {
+            if (game.noDealerTimeoutTask != null) game.noDealerTimeoutTask.cancel(false);
             game.dealerId = user.getId();
             game.dealerName = user.getFirstName();
             game.dealerBalance = bal;
@@ -2511,12 +2553,13 @@ public class CasinoBot extends TelegramLongPollingBot {
         ));
         SendMessage msg = new SendMessage(); msg.setChatId(String.valueOf(chatId)); msg.setParseMode("HTML");
         msg.setText("♠️ <b>BÀN XÌ LÁT</b>\n\n💰 Cược chính cố định: <b>5B/người</b>\n🤝 Cược ngoài: 1B / 10B / 20B / 50B / 100B / 200B\n\nNhấn nhận nhà cái để mở bàn, sau đó người chơi tham gia."); msg.setReplyMarkup(kb);
-        telegramExecutor.execute(() -> { try { Message sent=execute(msg); game.messageId=sent.getMessageId(); } catch(Exception e) { xilatGames.remove(chatId, game); System.err.println("[XILAT] Không tạo được bàn: "+e.getMessage()); } });
+        telegramExecutor.execute(() -> { try { Message sent=execute(msg); game.messageId=sent.getMessageId(); game.noDealerTimeoutTask=scheduler.schedule(() -> cancelIfNoXiLatDealer(chatId, game), 30, TimeUnit.SECONDS); } catch(Exception e) { xilatGames.remove(chatId, game); System.err.println("[XILAT] Không tạo được bàn: "+e.getMessage()); } });
     }
     private void createXiLatDealer(long chatId, User user, String queryId) {
         XiLatGame game=xilatGames.get(chatId); if(game==null || game.dealt) { answerAlert(queryId,"Bàn không còn nhận nhà cái."); return; }
         synchronized(game) {
             if(game.dealerId!=0) { answerAlert(queryId,"Đã có nhà cái rồi."); return; }
+            if (game.noDealerTimeoutTask != null) game.noDealerTimeoutTask.cancel(false);
             game.dealerId=user.getId(); game.dealerName=displayName(user); game.names.put(user.getId(),game.dealerName);
         }
         answerAlert(queryId,"Bạn đã nhận làm nhà cái."); updateXiLatLobby(chatId);
