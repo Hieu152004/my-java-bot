@@ -91,6 +91,9 @@ public class CasinoBot extends TelegramLongPollingBot {
     private final Map<Long, BaiCaoGame> baicaoGames = new ConcurrentHashMap<>();
     private final Map<Long, XiLatGame> xilatGames = new ConcurrentHashMap<>();
     private final Map<Long, LixiSession> lixiSessions = new ConcurrentHashMap<>();
+    private final Map<Long, AdminLixiBox> adminLixiBoxes = new ConcurrentHashMap<>();
+    private static final long ADMIN_LIXI_REWARD = 3_000_000_000L;
+    private static final int ADMIN_LIXI_WINNERS = 5;
     private final Map<Long, Long> lastLixiWinners = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Long, Integer> lastMenuMessageIds = new ConcurrentHashMap<>();
     private final List<String> diceHistory = new CopyOnWriteArrayList<>();
@@ -101,6 +104,11 @@ public class CasinoBot extends TelegramLongPollingBot {
     private final ExecutorService updateExecutor = Executors.newFixedThreadPool(16);
     private final ExecutorService priorityExecutor = Executors.newFixedThreadPool(2);
     private final ConcurrentHashMap<Long, Long> ensuredUsers = new ConcurrentHashMap<>();
+
+    private static class AdminLixiBox {
+        final Set<Long> claimedUsers = ConcurrentHashMap.newKeySet();
+        boolean closed = false;
+    }
 
     private static class LixiSession {
         long amount;
@@ -467,6 +475,17 @@ public class CasinoBot extends TelegramLongPollingBot {
                 return;
             }
             sendMainMenu(chatId);
+        } else if (text.matches("(?i)^/sodu(?:@\\w+)?$")) {
+            long balance = Database.getBalance(user.getId());
+            sendMessage(chatId, "💰 <b>SỐ DƯ HIỆN TẠI</b>\n👤 " + escapeHtml(displayName(user)) + "\n💵 Số dư: <b>" + formatDetailedMoney(balance) + " đ.</b>");
+        } else if (text.matches("(?i)^/lixi(?:@\\w+)?$")) {
+            if (!ADMIN_IDS.contains(user.getId())) { sendMessage(chatId, "⛔ Chỉ admin mới được tạo hộp lì xì."); return; }
+            AdminLixiBox box = new AdminLixiBox();
+            adminLixiBoxes.put(chatId, box);
+            InlineKeyboardMarkup markup = new InlineKeyboardMarkup(List.of(List.of(
+                    createBtn("🧧 NHẬN LÌ XÌ 3B (CÒN 5 SUẤT)", "admin_lixi_claim")
+            )));
+            sendMessageWithMarkup(chatId, "🎁 <b>HỘP QUÀ LÌ XÌ ĐÃ MỞ!</b>\n\n🧧 Có <b>5 suất</b>, mỗi người nhận thành công được <b>3B</b>.\n👆 Bấm nút bên dưới để nhận quà. Mỗi người chỉ nhận được 1 lần; đủ 5 người là hộp đóng!", markup);
         } else if (text.matches("(?i)^/diemdanh(?:@\\w+)?$")) {
             handleDiemDanh(message);
         } else if (text.matches("(?i)^/xoaall(?:@\\w+)?$")) {
@@ -756,6 +775,8 @@ public class CasinoBot extends TelegramLongPollingBot {
             rollDiceManual(chatId, user, query.getId());
         } else if (data.equals("bcua_roll")) {
             rollBauCuaManual(chatId, user, query.getId());
+        } else if (data.equals("admin_lixi_claim")) {
+            claimAdminLixi(chatId, user, query.getId());
         } else if (data.equals("claim_lixi")) {
             MaybeInaccessibleMessage maybeMsg = query.getMessage();
             Message msg = (maybeMsg instanceof Message) ? (Message) maybeMsg : null;
@@ -2553,6 +2574,31 @@ public class CasinoBot extends TelegramLongPollingBot {
         }
 
         sendResultThenMainMenu(chatId, sb.toString(), lixiMarkup);
+    }
+
+    private void claimAdminLixi(long chatId, User user, String queryId) {
+        AdminLixiBox box = adminLixiBoxes.get(chatId);
+        if (box == null) { answerAlert(queryId, "🧧 Hộp lì xì chưa được mở hoặc đã hết hạn."); return; }
+        synchronized (box) {
+            if (box.closed || box.claimedUsers.size() >= ADMIN_LIXI_WINNERS) {
+                box.closed = true;
+                answerAlert(queryId, "🧧 Hộp lì xì đã hết 5 suất!");
+                return;
+            }
+            if (box.claimedUsers.contains(user.getId())) {
+                answerAlert(queryId, "⚠️ Bạn đã nhận lì xì từ hộp này rồi!");
+                return;
+            }
+            box.claimedUsers.add(user.getId());
+            Database.changeBalance(user.getId(), ADMIN_LIXI_REWARD);
+            int claimed = box.claimedUsers.size();
+            if (claimed >= ADMIN_LIXI_WINNERS) {
+                box.closed = true;
+                adminLixiBoxes.remove(chatId, box);
+            }
+            answerAlert(queryId, "🎉 Bạn nhận thành công 3B lì xì!");
+            sendMessage(chatId, "🧧 " + getMention(user.getId(), user.getFirstName()) + " đã nhận lì xì <b>3B</b>! (" + claimed + "/" + ADMIN_LIXI_WINNERS + " suất)");
+        }
     }
 
     private void claimLixi(long chatId, User user, String queryId, Message message) {
