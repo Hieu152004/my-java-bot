@@ -718,6 +718,10 @@ public class CasinoBot extends TelegramLongPollingBot {
             return;
         }
 
+        // Chỉ cập nhật giao diện mỗi 10 giây (vẫn kiểm tra hết giờ mỗi 5 giây)
+        // để giảm số lần gọi Telegram mà không làm chậm xử lý kết thúc ván.
+        if (remaining % 10 != 0 && remaining > 5) return;
+
         EditMessageText edit = new EditMessageText();
         edit.setChatId(String.valueOf(chatId));
         edit.setMessageId(game.messageId);
@@ -1010,10 +1014,9 @@ public class CasinoBot extends TelegramLongPollingBot {
             game.turnVersion++;
             expectedTurnVersion = game.turnVersion;
         }
-        // Giảm tần suất sửa tin nhắn đếm ngược để tránh dồn yêu cầu Telegram.
         game.turnCountdown = scheduler.scheduleAtFixedRate(
                 () -> updateBaiCaoTurnTimer(chatId, expectedTurnVersion),
-                10, 10, TimeUnit.SECONDS);
+                5, 5, TimeUnit.SECONDS);
     }
 
     private String getBaiCaoPlayingText(BaiCaoGame game, int remainingSeconds) {
@@ -1099,7 +1102,12 @@ public class CasinoBot extends TelegramLongPollingBot {
             handleBaiCaoTimeout(chatId, timeoutUserId, expectedTurnVersion);
             return;
         }
-        updateBaiCaoPlayingMessage(chatId, remaining);
+
+        // Vẫn kiểm tra lượt mỗi 5 giây, nhưng chỉ sửa tin nhắn ở mốc 10 giây
+        // và 5 giây cuối để giảm tải Telegram. Các thao tác người chơi vẫn cập nhật ngay.
+        if (remaining % 10 == 0 || remaining <= 5) {
+            updateBaiCaoPlayingMessage(chatId, remaining);
+        }
     }
 
     private void showMyCards(long chatId, User user, String queryId) {
@@ -1691,7 +1699,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             updateGameMessage(chatId);
 
             if (game.countdownTask != null) game.countdownTask.cancel(true);
-            game.countdownTask = scheduler.scheduleAtFixedRate(() -> updateDiceGameTimer(chatId), 10, 10, TimeUnit.SECONDS);
+            game.countdownTask = scheduler.scheduleAtFixedRate(() -> updateDiceGameTimer(chatId), 5, 5, TimeUnit.SECONDS);
             
             sendMessage(chatId, "👑 <b>Đã chốt nhà cái:</b> " + game.dealerName + " (Số dư: " + formatDetailedMoney(game.dealerBalance) + " đ.)\n🎯 Mời các người chơi đặt cược trong 40 giây!\n\n🔗 <a href=\"" + getMessageLink(chatId, game.messageId) + "\">🎲 ẤN VÀO ĐÂY ĐỂ MỞ MENU CƯỢC</a>");
         }
@@ -2262,8 +2270,9 @@ public class CasinoBot extends TelegramLongPollingBot {
         AnswerCallbackQuery answer = new AnswerCallbackQuery();
         answer.setCallbackQueryId(queryId);
         answer.setText(text);
-        answer.setShowAlert(false); // Hiển thị thông báo nhỏ (toast), không bật hộp thoại che màn hình.
-        // Tách phản hồi nút bấm khỏi hàng đợi gửi/sửa tin nhắn để Telegram hiện phản hồi sớm hơn.
+        // Tách phản hồi nút khỏi hàng đợi gửi/sửa tin nhắn để nút phản hồi nhanh hơn.
+        // Giữ nguyên showAlert=true để nút XEM BÀI vẫn hiện popup như trước.
+        answer.setShowAlert(true);
         callbackExecutor.execute(() -> {
             try {
                 execute(answer);
