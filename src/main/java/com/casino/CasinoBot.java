@@ -647,9 +647,12 @@ public class CasinoBot extends TelegramLongPollingBot {
 
     private String renderPlayerIcon(String icon) {
         if (icon != null && icon.startsWith("CUSTOM:")) {
-            String id = icon.substring("CUSTOM:".length()).trim();
-            if (id.matches("[0-9]+")) {
-                return "<tg-emoji emoji-id=\"" + id + "\">⭐</tg-emoji>";
+            String sub = icon.substring("CUSTOM:".length());
+            String[] p = sub.split("\\|", 2);
+            String emojiId = p[0].trim();
+            String fallback = (p.length > 1 && !p[1].isBlank()) ? p[1].trim() : "⭐";
+            if (emojiId.matches("[0-9]+")) {
+                return "<tg-emoji emoji-id=\"" + emojiId + "\">" + escapeHtml(fallback) + "</tg-emoji>";
             }
         }
         return escapeHtml(icon == null ? "" : icon);
@@ -680,7 +683,11 @@ public class CasinoBot extends TelegramLongPollingBot {
             for (MessageEntity entity : message.getEntities()) {
                 if (entity != null && "custom_emoji".equalsIgnoreCase(entity.getType())
                         && entity.getCustomEmojiId() != null && !entity.getCustomEmojiId().isBlank()) {
-                    icon = "CUSTOM:" + entity.getCustomEmojiId();
+                    String fallback = "⭐";
+                    if (message.getText() != null && entity.getOffset() >= 0 && entity.getOffset() + entity.getLength() <= message.getText().length()) {
+                        fallback = message.getText().substring(entity.getOffset(), entity.getOffset() + entity.getLength());
+                    }
+                    icon = "CUSTOM:" + entity.getCustomEmojiId() + "|" + fallback;
                     break;
                 }
             }
