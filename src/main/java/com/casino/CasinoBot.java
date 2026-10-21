@@ -41,9 +41,10 @@ import java.util.concurrent.*;
 
 public class CasinoBot extends TelegramLongPollingBot {
 
-    private static final String TOKEN = System.getenv().getOrDefault("TELEGRAM_BOT_TOKEN", "REPLACE_WITH_NEW_BOT_TOKEN");
+    private static final String TOKEN = System.getenv().getOrDefault("8846203742:AAH6phjqvFPTDd6Y6xakWSu5RY7t5DiJjTA", "8846203742:AAH6phjqvFPTDd6Y6xakWSu5RY7t5DiJjTA");
 
     private static volatile boolean maintenanceMode = false;
+    private static volatile boolean transferLocked = false;
 
     private static final Set<Long> ADMIN_IDS = new HashSet<>(Arrays.asList(7964831905L));
     private static final Set<Long> KNOWN_GROUP_IDS = ConcurrentHashMap.newKeySet();
@@ -477,7 +478,16 @@ public class CasinoBot extends TelegramLongPollingBot {
                 System.err.println("[XOAALL] Không thể reset số dư: " + e.getMessage());
                 sendMessage(chatId, "❌ Không thể thực hiện /xoaall. Kiểm tra kết nối database và thử lại.");
             }
+        } else if (text.matches("(?i)^/khoackd(?:@\\w+)?$")) {
+            if (!ADMIN_IDS.contains(user.getId())) { sendMessage(chatId, "⛔ Bạn không có quyền dùng lệnh này."); return; }
+            transferLocked = true;
+            sendMessage(chatId, "🔒 <b>ĐÃ KHÓA CHUYỂN ĐIỂM</b>\nNgười chơi thường không thể dùng /ckd. Chỉ admin được chuyển điểm.\nDùng /mokhoackd để mở lại.");
+        } else if (text.matches("(?i)^/mokhoackd(?:@\\w+)?$")) {
+            if (!ADMIN_IDS.contains(user.getId())) { sendMessage(chatId, "⛔ Bạn không có quyền dùng lệnh này."); return; }
+            transferLocked = false;
+            sendMessage(chatId, "🔓 <b>ĐÃ MỞ KHÓA CHUYỂN ĐIỂM</b>\nNgười chơi có thể dùng /ckd trở lại.");
         } else if (text.startsWith("/ckd")) {
+            if (transferLocked && !ADMIN_IDS.contains(user.getId())) { sendMessage(chatId, "🔒 Chức năng /ckd đang bị khóa. Chỉ admin được chuyển điểm."); return; }
             handleTransfer(message);
         } else if (text.startsWith("/setvip") && ADMIN_IDS.contains(user.getId())) {
             handleSetVip(message, true);
