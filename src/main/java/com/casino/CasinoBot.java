@@ -648,11 +648,12 @@ public class CasinoBot extends TelegramLongPollingBot {
     private String renderPlayerIcon(String icon) {
         if (icon != null && icon.startsWith("CUSTOM:")) {
             String sub = icon.substring("CUSTOM:".length());
-            String[] p = sub.split("\\|", 2);
-            String emojiId = p[0].trim();
-            String fallback = (p.length > 1 && !p[1].isBlank()) ? p[1].trim() : "⭐";
+            String[] parts = sub.split("\\|", 2);
+            String emojiId = parts[0].trim();
+            String emojiChar = (parts.length > 1 && !parts[1].isBlank()) ? parts[1].trim() : "⭐";
+            
             if (emojiId.matches("[0-9]+")) {
-                return "<tg-emoji emoji-id=\"" + emojiId + "\">" + escapeHtml(fallback) + "</tg-emoji>";
+                return "<tg-emoji emoji-id=\"" + emojiId + "\">" + escapeHtml(emojiChar) + "</tg-emoji>";
             }
         }
         return escapeHtml(icon == null ? "" : icon);
@@ -673,36 +674,43 @@ public class CasinoBot extends TelegramLongPollingBot {
         // Reply vào tin nhắn người chơi rồi gửi /seticon kèm emoji.
         if (message.getReplyToMessage() != null) {
             targetId = message.getReplyToMessage().getFrom().getId();
-        } else if (parts.length >= 3) {
+        } else if (parts.length >= 2) {
             try { targetId = Long.parseLong(parts[1]); }
             catch (NumberFormatException ignored) { }
         }
 
-        // Custom emoji phải lấy ID từ MessageEntity trên chính tin nhắn lệnh.
+        // Custom emoji phải lấy ID và ký tự hiển thị thực tế từ MessageEntity
         if (message.getEntities() != null) {
             for (MessageEntity entity : message.getEntities()) {
                 if (entity != null && "custom_emoji".equalsIgnoreCase(entity.getType())
                         && entity.getCustomEmojiId() != null && !entity.getCustomEmojiId().isBlank()) {
-                    String fallback = "⭐";
-                    if (message.getText() != null && entity.getOffset() >= 0 && entity.getOffset() + entity.getLength() <= message.getText().length()) {
-                        fallback = message.getText().substring(entity.getOffset(), entity.getOffset() + entity.getLength());
+                    
+                    String emojiChar = "⭐";
+                    if (message.getText() != null && entity.getOffset() >= 0 
+                            && entity.getOffset() + entity.getLength() <= message.getText().length()) {
+                        emojiChar = message.getText().substring(entity.getOffset(), entity.getOffset() + entity.getLength());
                     }
-                    icon = "CUSTOM:" + entity.getCustomEmojiId() + "|" + fallback;
+                    
+                    icon = "CUSTOM:" + entity.getCustomEmojiId() + "|" + emojiChar;
                     break;
                 }
             }
         }
 
         if (icon == null) {
-            if (message.getReplyToMessage() != null && parts.length >= 2) {
-                icon = parts[1];
-            } else if (parts.length >= 3) {
-                icon = parts[2];
+            if (message.getReplyToMessage() != null && parts.length >= 1) {
+                icon = parts[0].startsWith("/") ? (parts.length >= 2 ? parts[1] : null) : parts[0];
+            } else if (parts.length >= 2) {
+                icon = parts[parts.length - 1];
             }
         }
 
+        if (targetId == null && message.getReplyToMessage() != null) {
+            targetId = message.getReplyToMessage().getFrom().getId();
+        }
+
         if (targetId == null || icon == null || icon.isBlank()) {
-            sendMessage(chatId, "📝 <b>Cách dùng /seticon</b>\\n• Reply tin nhắn người chơi rồi nhập <code>/seticon 👑</code> (emoji thường hoặc emoji Premium).\\n• Hoặc nhập <code>/seticon 123456789 👑</code>.\\n• Gỡ icon: dùng <code>off</code> thay icon.");
+            sendMessage(chatId, "📝 <b>Cách dùng /seticon</b>\n• Reply tin nhắn người chơi rồi nhập <code>/seticon 👑</code> (emoji thường hoặc emoji Premium).\n• Hoặc nhập <code>/seticon 123456789 👑</code>.\n• Gỡ icon: dùng <code>off</code> thay icon.");
             return;
         }
 
@@ -718,7 +726,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         }
 
         boolean custom = icon.startsWith("CUSTOM:");
-        if ((!custom && (icon.codePointCount(0, icon.length()) > 10 || icon.contains("<") || icon.contains(">") || icon.contains("&") || icon.contains("|")))
+        if ((!custom && (icon.codePointCount(0, icon.length()) > 15 || icon.contains("<") || icon.contains(">") || icon.contains("&") || icon.contains("|")))
                 || (custom && !icon.substring(7, Math.min(icon.indexOf('|'), icon.length())).matches("[0-9]+"))) {
             sendMessage(chatId, "❌ Icon không hợp lệ. Hãy gửi một emoji ngắn hoặc emoji Premium.");
             return;
