@@ -52,7 +52,6 @@ public class CasinoBot extends TelegramLongPollingBot {
     private static final Path CHECKIN_FILE = Paths.get("diemdanh_data.txt");
     private static final long DIEM_DANH_REWARD = 10_000_000_000L;
     private static final long DIEM_DANH_BALANCE_LIMIT = 5_000_000_000L;
-    private static final Path YEUBI_FILE = Paths.get("yeubi_data.txt");
     private static final Path ICON_FILE = Paths.get("icone_data.txt");
     private static final Map<Long, String> PLAYER_ICONS = new ConcurrentHashMap<>();
     private final Map<Long, Long> temporaryVipUntil = new ConcurrentHashMap<>();
@@ -2103,10 +2102,24 @@ public class CasinoBot extends TelegramLongPollingBot {
     }
 
     private boolean isVipActive(long userId) {
-        Long until = temporaryVipUntil.get(userId);
-        if (until != null) {
-            if (until > System.currentTimeMillis()) return true;
-            temporaryVipUntil.remove(userId, until);
+        long now = System.currentTimeMillis();
+        Long cachedUntil = temporaryVipUntil.get(userId);
+        if (cachedUntil != null) {
+            if (cachedUntil > now) return true;
+            if (cachedUntil == 0L) return Database.isVip(userId);
+            temporaryVipUntil.remove(userId, cachedUntil);
+        }
+
+        try {
+            long persistedUntil = Database.getTemporaryVipUntil(userId);
+            if (persistedUntil > now) {
+                temporaryVipUntil.put(userId, persistedUntil);
+                return true;
+            }
+            // Cache that no active temporary VIP exists to avoid querying Supabase on every check.
+            temporaryVipUntil.put(userId, 0L);
+        } catch (java.sql.SQLException e) {
+            System.err.println("[YEUBI] Không đọc được VIP tạm từ Supabase: " + e.getMessage());
         }
         return Database.isVip(userId);
     }
@@ -2114,34 +2127,19 @@ public class CasinoBot extends TelegramLongPollingBot {
     private synchronized void handleYeubi(Message message) {
         long uid = message.getFrom().getId();
         LocalDate today = LocalDate.now(ZoneId.of("Asia/Ho_Chi_Minh"));
-        Map<Long, String> uses = new HashMap<>();
-        try {
-            if (Files.exists(YEUBI_FILE)) {
-                for (String line : Files.readAllLines(YEUBI_FILE, StandardCharsets.UTF_8)) {
-                    String[] parts = line.trim().split("\\|");
-                    if (parts.length == 2) try { uses.put(Long.parseLong(parts[0]), parts[1]); } catch (NumberFormatException ignored) { }
-                }
-            }
-        } catch (IOException e) {
-            sendMessage(message.getChatId(), "❌ Không đọc được dữ liệu /yeubi. Vui lòng thử lại.");
-            return;
-        }
-        if (today.toString().equals(uses.get(uid))) {
-            sendMessage(message.getChatId(), "⚠️ Bạn đã dùng /yeubi hôm nay rồi. Mỗi ngày chỉ được dùng 1 lần.");
-            return;
-        }
-        uses.put(uid, today.toString());
-        List<String> lines = new ArrayList<>();
-        uses.forEach((id, date) -> lines.add(id + "|" + date));
-        try {
-            Files.write(YEUBI_FILE, lines, StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            sendMessage(message.getChatId(), "❌ Không lưu được lượt dùng /yeubi. Vui lòng thử lại.");
-            return;
-        }
         long until = System.currentTimeMillis() + 30 * 60 * 1000L;
-        temporaryVipUntil.put(uid, until);
-        sendMessage(message.getChatId(), "💖 <b>KÍCH HOẠT VIP TẠM THỜI THÀNH CÔNG!</b>\n⭐ Bạn được dùng quyền VIP trong <b>30 phút</b>.\n📅 /yeubi chỉ dùng được <b>1 lần mỗi ngày</b>.");
+        try {
+            boolean claimed = Database.claimTemporaryVip(uid, today, until);
+            if (!claimed) {
+                sendMessage(message.getChatId(), "⚠️ Bạn đã dùng /yeubi hôm nay rồi. Mỗi ngày chỉ được dùng 1 lần.");
+                return;
+            }
+            temporaryVipUntil.put(uid, until);
+            sendMessage(message.getChatId(), "💖 <b>KÍCH HOẠT VIP TẠM THỜI THÀNH CÔNG!</b>\\n⭐ Bạn được dùng quyền VIP trong <b>30 phút</b>.\\n📅 /yeubi chỉ dùng được <b>1 lần mỗi ngày</b>.");
+        } catch (java.sql.SQLException e) {
+            System.err.println("[YEUBI] Không lưu được VIP tạm vào Supabase: " + e.getMessage());
+            sendMessage(message.getChatId(), "❌ Không kết nối được Supabase để lưu /yeubi. Chưa kích hoạt VIP, vui lòng thử lại.");
+        }
     }
 
     private void handleSetVip(Message message, boolean status) {
