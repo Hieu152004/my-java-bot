@@ -1595,11 +1595,35 @@ public class CasinoBot extends TelegramLongPollingBot {
         startBaiCaoGame(chatId);
     }
 
+    // Compatibility helpers: use the existing Database API while keeping deductions checked.
+    private synchronized boolean tryChangeBalance(long userId, long amount) {
+        long current = Database.getBalance(userId);
+        if (amount < 0 && current < -amount) return false;
+        Database.changeBalance(userId, amount);
+        return true;
+    }
+
+    private synchronized boolean tryDeductBalances(List<Long> userIds, long amount) {
+        if (userIds == null || amount < 0) return false;
+        Map<Long, Long> required = new LinkedHashMap<>();
+        for (Long userId : userIds) {
+            if (userId == null) return false;
+            required.put(userId, required.getOrDefault(userId, 0L) + amount);
+        }
+        for (Map.Entry<Long, Long> entry : required.entrySet()) {
+            if (Database.getBalance(entry.getKey()) < entry.getValue()) return false;
+        }
+        for (Map.Entry<Long, Long> entry : required.entrySet()) {
+            Database.changeBalance(entry.getKey(), -entry.getValue());
+        }
+        return true;
+    }
+
     private void startBaiCaoGame(long chatId) {
         BaiCaoGame game = baicaoGames.get(chatId);
         if (game == null) return;
 
-        if (!Database.tryDeductBalances(game.playerOrder, game.betAmount)) {
+        if (!tryDeductBalances(game.playerOrder, game.betAmount)) {
             sendMessage(chatId, "❌ Không thể bắt đầu Bài Tố: có người không còn đủ tiền cược sàn. Ván đã được hủy, không ai bị trừ tiền.");
             baicaoGames.remove(chatId);
             if (game.lobbyCountdown != null) game.lobbyCountdown.cancel(true);
@@ -1872,7 +1896,7 @@ public class CasinoBot extends TelegramLongPollingBot {
                     sendMessage(chatId, "🔥 " + getMention(userId, user.getFirstName()) + " đã hết tiền và được tính là TẤT TAY.");
                 } else if (userBal < need) {
                     long actual = userBal;
-                    if (!Database.tryChangeBalance(userId, -actual)) {
+                    if (!tryChangeBalance(userId, -actual)) {
                         if (queryId != null) answerAlert(queryId, "❌ Không thể cập nhật số dư, vui lòng thử lại.");
                         return;
                     }
@@ -1883,7 +1907,7 @@ public class CasinoBot extends TelegramLongPollingBot {
                     actionAccepted = true;
                     sendMessage(chatId, "🔥 " + getMention(userId, user.getFirstName()) + " không đủ tiền theo nên đã TẤT TAY toàn bộ " + formatDetailedMoney(actual) + " đ.! ");
                 } else {
-                    if (!Database.tryChangeBalance(userId, -need)) {
+                    if (!tryChangeBalance(userId, -need)) {
                         if (queryId != null) answerAlert(queryId, "❌ Số dư vừa thay đổi, không đủ để Theo. Vui lòng thử lại.");
                         return;
                     }
@@ -1914,7 +1938,7 @@ public class CasinoBot extends TelegramLongPollingBot {
                     if (queryId != null) answerAlert(queryId, "❌ Không đủ tiền để Theo + Tố 50% số dư. Cần " + formatDetailedMoney(totalNeed) + " đ. hoặc chọn TẤT TAY.");
                     return;
                 }
-                if (!Database.tryChangeBalance(userId, -totalNeed)) {
+                if (!tryChangeBalance(userId, -totalNeed)) {
                     if (queryId != null) answerAlert(queryId, "❌ Số dư vừa thay đổi, vui lòng thử lại.");
                     return;
                 }
@@ -1938,7 +1962,7 @@ public class CasinoBot extends TelegramLongPollingBot {
                     if (queryId != null) answerAlert(queryId, "❌ Không đủ tiền để Tố. Cần " + formatDetailedMoney(totalNeed) + " đ. hoặc chọn TẤT TAY.");
                     return;
                 }
-                if (!Database.tryChangeBalance(userId, -totalNeed)) {
+                if (!tryChangeBalance(userId, -totalNeed)) {
                     if (queryId != null) answerAlert(queryId, "❌ Số dư vừa thay đổi, vui lòng thử lại.");
                     return;
                 }
@@ -1960,7 +1984,7 @@ public class CasinoBot extends TelegramLongPollingBot {
                     if (queryId != null) answerAlert(queryId, "❌ Số dư của bạn đã hết, không thể cược thêm.");
                     return;
                 }
-                if (!Database.tryChangeBalance(userId, -userBal)) {
+                if (!tryChangeBalance(userId, -userBal)) {
                     if (queryId != null) answerAlert(queryId, "❌ Số dư vừa thay đổi, vui lòng thử lại.");
                     return;
                 }
@@ -2638,7 +2662,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         }
 
         if (!isAdmin) {
-            if (!Database.tryChangeBalance(senderId, -amount)) {
+            if (!tryChangeBalance(senderId, -amount)) {
                 sendMessage(message.getChatId(), "❌ Số dư không đủ hoặc vừa thay đổi!");
                 return;
             }
@@ -2698,7 +2722,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         if(user.getId()==g.dealerId) { answerAlert(queryId,"Nhà cái không tham gia cược chính."); return; }
         if(g.order.contains(user.getId())) { answerAlert(queryId,"Bạn đã vào bàn rồi."); return; }
         if(Database.getBalance(g.dealerId) < XILAT_BET * (g.order.size()+1L)) { answerAlert(queryId,"Nhà cái không đủ số dư để bảo đảm trả thưởng cho thêm nhà này."); return; }
-        if(Database.getBalance(user.getId())<XILAT_BET || !Database.tryChangeBalance(user.getId(),-XILAT_BET)) { answerAlert(queryId,"Không đủ 5B để tham gia."); return; }
+        if(Database.getBalance(user.getId())<XILAT_BET || !tryChangeBalance(user.getId(),-XILAT_BET)) { answerAlert(queryId,"Không đủ 5B để tham gia."); return; }
         g.order.add(user.getId()); g.names.put(user.getId(),displayName(user));
         answerAlert(queryId,"Đã tham gia Xì Lát, cược 5B đã khóa."); updateXiLatLobby(chatId);
     }
@@ -3154,7 +3178,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         if (g == null || g.dealt) { answerAlert(q, "Cược ngoài chỉ tạo được trước khi chia bài."); return; }
         if (Arrays.stream(XILAT_SIDE_BETS).noneMatch(v -> v == amount)) { answerAlert(q, "Mức cược không hợp lệ."); return; }
         if (user.getId() != g.dealerId && !g.order.contains(user.getId())) { answerAlert(q, "Bạn cần tham gia bàn Xì Lát trước khi tạo cược ngoài."); return; }
-        if (Database.getBalance(user.getId()) < amount || !Database.tryChangeBalance(user.getId(), -amount)) { answerAlert(q, "Không đủ điểm để khóa kèo."); return; }
+        if (Database.getBalance(user.getId()) < amount || !tryChangeBalance(user.getId(), -amount)) { answerAlert(q, "Không đủ điểm để khóa kèo."); return; }
         g.sideBets.add(new XiLatSideBet(user.getId(), displayName(user), amount));
         answerAlert(q, "Đã tạo kèo ngoài " + formatShortMoney(amount) + "; chờ người nhận.");
         
@@ -3180,7 +3204,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         if (b.accepterId != 0) { answerAlert(q, "Kèo này đã có người nhận rồi."); return; }
         if (b.offererId == user.getId()) { answerAlert(q, "Bạn là người tạo kèo nên không thể tự nhận kèo của mình; hãy để người chơi khác nhận."); return; }
         if (user.getId() != g.dealerId && !g.order.contains(user.getId())) { answerAlert(q, "Chỉ thành viên thuộc bàn mới được nhận kèo ngoài."); return; }
-        if (Database.getBalance(user.getId()) < b.amount || !Database.tryChangeBalance(user.getId(), -b.amount)) { answerAlert(q, "Không đủ điểm nhận kèo."); return; }
+        if (Database.getBalance(user.getId()) < b.amount || !tryChangeBalance(user.getId(), -b.amount)) { answerAlert(q, "Không đủ điểm nhận kèo."); return; }
         b.accepterId = user.getId(); b.accepterName = displayName(user); g.names.putIfAbsent(user.getId(), b.accepterName);
         if (b.messageId != null) {
             deleteMessage(chatId, b.messageId);
