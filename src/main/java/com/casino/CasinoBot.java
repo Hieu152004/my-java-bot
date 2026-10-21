@@ -41,7 +41,7 @@ import java.util.concurrent.*;
 
 public class CasinoBot extends TelegramLongPollingBot {
 
-    private static final String TOKEN = System.getenv().getOrDefault("8846203742:AAH6phjqvFPTDd6Y6xakWSu5RY7t5DiJjTA", "8846203742:AAH6phjqvFPTDd6Y6xakWSu5RY7t5DiJjTA");
+    private static final String TOKEN = System.getenv().getOrDefault("TELEGRAM_BOT_TOKEN", "REPLACE_WITH_NEW_BOT_TOKEN");
 
     private static volatile boolean maintenanceMode = false;
 
@@ -468,6 +468,15 @@ public class CasinoBot extends TelegramLongPollingBot {
             sendMainMenu(chatId);
         } else if (text.matches("(?i)^/diemdanh(?:@\\w+)?$")) {
             handleDiemDanh(message);
+        } else if (text.matches("(?i)^/xoaall(?:@\\w+)?$")) {
+            if (!ADMIN_IDS.contains(user.getId())) { sendMessage(chatId, "⛔ Bạn không có quyền dùng lệnh này."); return; }
+            try {
+                int resetCount = Database.resetAllBalancesAndVipExcept(7964831905L);
+                sendMessage(chatId, "✅ <b>ĐÃ XÓA ALL SỐ DƯ</b>\n💰 Số dư người chơi đã được đưa về <b>1B</b>.\n⭐ VIP riêng đã bị xóa.\n🛡 Admin 7964831905 được giữ nguyên số dư và trạng thái.");
+            } catch (Exception e) {
+                System.err.println("[XOAALL] Không thể reset số dư: " + e.getMessage());
+                sendMessage(chatId, "❌ Không thể thực hiện /xoaall. Kiểm tra kết nối database và thử lại.");
+            }
         } else if (text.startsWith("/ckd")) {
             handleTransfer(message);
         } else if (text.startsWith("/setvip") && ADMIN_IDS.contains(user.getId())) {
