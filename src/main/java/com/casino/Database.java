@@ -4,6 +4,7 @@ import java.sql.*;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.util.Locale;
+import java.time.LocalDate;
 
 public class Database {
     private static final String DB_URL = System.getenv("SUPABASE_URL") != null ? 
@@ -24,6 +25,10 @@ public class Database {
                     "balance BIGINT DEFAULT 500000000, " +
                     "is_vip INT DEFAULT 0)";
             stmt.execute(sql);
+            stmt.execute("CREATE TABLE IF NOT EXISTS temporary_vip (" +
+                    "user_id BIGINT PRIMARY KEY, " +
+                    "expires_at BIGINT NOT NULL, " +
+                    "last_claim_date DATE NOT NULL)");
         } catch (SQLException e) {
             e.printStackTrace();
         }
@@ -102,6 +107,38 @@ public class Database {
         } catch (SQLException e) {
             e.printStackTrace();
         }
+    }
+
+    /**
+     * Grants temporary VIP and records the daily claim in Supabase atomically.
+     * Returns false if this user already claimed /yeubi on the given Vietnam date.
+     */
+    public static synchronized boolean claimTemporaryVip(long userId, LocalDate today, long expiresAtMillis)
+            throws SQLException {
+        String sql = "INSERT INTO temporary_vip (user_id, expires_at, last_claim_date) VALUES (?, ?, ?) " +
+                "ON CONFLICT (user_id) DO UPDATE SET expires_at = EXCLUDED.expires_at, " +
+                "last_claim_date = EXCLUDED.last_claim_date " +
+                "WHERE temporary_vip.last_claim_date IS DISTINCT FROM EXCLUDED.last_claim_date";
+        try (Connection conn = DriverManager.getConnection(DB_URL);
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setLong(1, userId);
+            pstmt.setLong(2, expiresAtMillis);
+            pstmt.setDate(3, Date.valueOf(today));
+            return pstmt.executeUpdate() > 0;
+        }
+    }
+
+    /** Returns the stored temporary VIP expiry time in epoch milliseconds, or 0 if none exists. */
+    public static synchronized long getTemporaryVipUntil(long userId) throws SQLException {
+        try (Connection conn = DriverManager.getConnection(DB_URL);
+             PreparedStatement pstmt = conn.prepareStatement(
+                     "SELECT expires_at FROM temporary_vip WHERE user_id = ?")) {
+            pstmt.setLong(1, userId);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) return rs.getLong("expires_at");
+            }
+        }
+        return 0L;
     }
 
     public static synchronized String getTopText(long[] adminIds) {
