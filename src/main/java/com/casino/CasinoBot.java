@@ -70,7 +70,8 @@ public class CasinoBot extends TelegramLongPollingBot {
     private final long botStartupTime = System.currentTimeMillis() / 1000L;
 
     private static final long[] BET_AMOUNTS = {
-            500_000_000L, 1_000_000_000L, 2_000_000_000L, 5_000_000_000L,
+            100_000_000L, 200_000_000L, 500_000_000L,
+            1_000_000_000L, 2_000_000_000L, 5_000_000_000L,
             7_000_000_000L, 10_000_000_000L, 15_000_000_000L,
             20_000_000_000L, 50_000_000_000L, 100_000_000_000L, 300_000_000_000L
     };
@@ -2589,6 +2590,10 @@ public class CasinoBot extends TelegramLongPollingBot {
                 answerAlert(queryId, "⚠️ Bạn đã nhận lì xì từ hộp này rồi!");
                 return;
             }
+            if (Database.getBalance(user.getId()) > 8_000_000_000L) {
+                answerAlert(queryId, "⚠️ Số dư trên 8B không được nhận lì xì!");
+                return;
+            }
             box.claimedUsers.add(user.getId());
             Database.changeBalance(user.getId(), ADMIN_LIXI_REWARD);
             int claimed = box.claimedUsers.size();
@@ -2613,8 +2618,8 @@ public class CasinoBot extends TelegramLongPollingBot {
             return;
         }
 
-        if (Database.getBalance(user.getId()) >= 10_000_000_000L) {
-            answerAlert(queryId, "⚠️ Số dư từ 10B trở lên không được nhận lì xì!");
+        if (Database.getBalance(user.getId()) > 8_000_000_000L) {
+            answerAlert(queryId, "⚠️ Số dư trên 8B không được nhận lì xì!");
             return;
         }
 
