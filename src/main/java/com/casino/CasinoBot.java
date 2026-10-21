@@ -50,9 +50,10 @@ public class CasinoBot extends TelegramLongPollingBot {
     private static final Set<Long> KNOWN_GROUP_IDS = ConcurrentHashMap.newKeySet();
     private static final Path KNOWN_GROUPS_FILE = Paths.get("known_groups.txt");
     private static final Path CHECKIN_FILE = Paths.get("diemdanh_data.txt");
-    private static final long DIEM_DANH_REWARD = 2_000_000_000L;
-    private static final long DIEM_DANH_BALANCE_LIMIT = 300_000_000L;
-    private static final int DIEM_DANH_DAILY_LIMIT = 3;
+    private static final long DIEM_DANH_REWARD = 10_000_000_000L;
+    private static final long DIEM_DANH_BALANCE_LIMIT = 5_000_000_000L;
+    private static final Path YEUBI_FILE = Paths.get("yeubi_data.txt");
+    private final Map<Long, Long> temporaryVipUntil = new ConcurrentHashMap<>();
     private final Set<Long> checkinLocks = ConcurrentHashMap.newKeySet();
 
     static {
@@ -84,7 +85,6 @@ public class CasinoBot extends TelegramLongPollingBot {
     private final Map<Long, BaiCaoGame> baicaoGames = new ConcurrentHashMap<>();
     private final Map<Long, LixiSession> lixiSessions = new ConcurrentHashMap<>();
     private final Map<Long, AdminLixiBox> adminLixiBoxes = new ConcurrentHashMap<>();
-    private final Map<Long, ScheduledFuture<?>> autoLixiTasks = new ConcurrentHashMap<>();
     private static final long ADMIN_LIXI_REWARD = 3_000_000_000L;
     private static final int ADMIN_LIXI_WINNERS = 5;
     private final Map<Long, Long> lastLixiWinners = new ConcurrentHashMap<>();
@@ -100,7 +100,6 @@ public class CasinoBot extends TelegramLongPollingBot {
     private static class AdminLixiBox {
         final Set<Long> claimedUsers = ConcurrentHashMap.newKeySet();
         volatile boolean closed = false;
-        volatile Integer messageId;
     }
 
     private static class LixiSession {
@@ -376,11 +375,8 @@ public class CasinoBot extends TelegramLongPollingBot {
         String[] rec = records.get(uid);
         int count = 0;
         if (rec != null && today.toString().equals(rec[0])) try { count = Integer.parseInt(rec[1]); } catch (Exception ignored) {}
-        if (count == 0 && Database.getBalance(uid) >= DIEM_DANH_BALANCE_LIMIT) {
-            sendMessage(message.getChatId(), "❌ Bạn chỉ được bắt đầu điểm danh khi số dư dưới 300M."); return;
-        }
-        if (count >= DIEM_DANH_DAILY_LIMIT) {
-            sendMessage(message.getChatId(), "⚠️ Hôm nay bạn đã dùng đủ 3 lượt điểm danh. Mai quay lại nhé!"); return;
+        if (Database.getBalance(uid) >= DIEM_DANH_BALANCE_LIMIT) {
+            sendMessage(message.getChatId(), "❌ Chỉ được điểm danh khi số dư dưới 5B."); return;
         }
         Database.changeBalance(uid, DIEM_DANH_REWARD);
         count++;
@@ -389,7 +385,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         records.forEach((id, value) -> lines.add(id + "|" + value[0] + "|" + value[1]));
         try { Files.write(CHECKIN_FILE, lines, StandardCharsets.UTF_8); }
         catch (IOException e) { Database.changeBalance(uid, -DIEM_DANH_REWARD); sendMessage(message.getChatId(), "❌ Không lưu được lượt điểm danh, tiền thưởng đã được hoàn lại. Kiểm tra ổ lưu trữ của bot."); return; }
-        sendMessage(message.getChatId(), "✅ <b>ĐIỂM DANH THÀNH CÔNG!</b>\n🎁 Nhận: <b>2B</b>\n📅 Lượt hôm nay: <b>" + count + "/3</b>\n💰 Số dư: <b>" + formatDetailedMoney(Database.getBalance(uid)) + " đ.</b>");
+        sendMessage(message.getChatId(), "✅ <b>ĐIỂM DANH THÀNH CÔNG!</b>\n🎁 Nhận: <b>10B</b>\n🔓 Không giới hạn số lần, miễn số dư trước khi nhận dưới 5B.\n💰 Số dư: <b>" + formatDetailedMoney(Database.getBalance(uid)) + " đ.</b>");
     }
 
     private void handleMessage(Message message) {
@@ -423,14 +419,14 @@ public class CasinoBot extends TelegramLongPollingBot {
                 return;
             }
             sendMainMenu(chatId);
+        } else if (text.matches("(?i)^/yeubi(?:@\\w+)?$")) {
+            handleYeubi(message);
         } else if (text.matches("(?i)^/sodu(?:@\\w+)?$")) {
             long balance = Database.getBalance(user.getId());
             sendMessage(chatId, "💰 <b>SỐ DƯ HIỆN TẠI</b>\n👤 " + escapeHtml(displayName(user)) + "\n💵 Số dư: <b>" + formatDetailedMoney(balance) + " đ.</b>");
         } else if (text.matches("(?i)^/lixi(?:@\\w+)?$")) {
             if (!ADMIN_IDS.contains(user.getId())) { sendMessage(chatId, "⛔ Chỉ admin mới được tạo hộp lì xì."); return; }
             postAdminLixiBox(chatId);
-            autoLixiTasks.computeIfAbsent(chatId, id -> scheduler.scheduleAtFixedRate(
-                    () -> postAdminLixiBox(id), 30, 30, TimeUnit.MINUTES));
         } else if (text.matches("(?i)^/diemdanh(?:@\\w+)?$")) {
             handleDiemDanh(message);
         } else if (text.matches("(?i)^/xoaall(?:@\\w+)?$")) {
@@ -1859,22 +1855,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         InlineKeyboardMarkup markup = new InlineKeyboardMarkup(List.of(List.of(
                 createBtn("🧧 NHẬN LÌ XÌ 3B (CÒN 5 SUẤT)", "admin_lixi_claim")
         )));
-        SendMessage msg = new SendMessage();
-        msg.setChatId(String.valueOf(chatId));
-        msg.setText("🎁 <b>HỘP QUÀ LÌ XÌ ĐÃ MỞ!</b>\n\n🧧 Có <b>5 suất</b>, mỗi người nhận thành công được <b>3B</b>.\n👆 Bấm nút bên dưới để nhận quà. Mỗi người chỉ nhận được 1 lần; đủ 5 người là hộp tự đóng và tin nhắn quà tự xóa!");
-        msg.setParseMode("HTML");
-        msg.setReplyMarkup(markup);
-        try {
-            Message sent = execute(msg);
-            box.messageId = sent.getMessageId();
-            PinChatMessage pin = new PinChatMessage();
-            pin.setChatId(String.valueOf(chatId));
-            pin.setMessageId(sent.getMessageId());
-            pin.setDisableNotification(true);
-            execute(pin);
-        } catch (TelegramApiException e) {
-            System.err.println("[LIXI] Không gửi/gim được hộp lì xì trong chat " + chatId + ": " + e.getMessage());
-        }
+        sendMessageWithMarkup(chatId, "🎁 <b>HỘP QUÀ LÌ XÌ ĐÃ MỞ!</b>\n\n🧧 Có <b>5 suất</b>, mỗi người nhận thành công được <b>3B</b>.\n👆 Bấm nút bên dưới để nhận quà. Mỗi người chỉ nhận được 1 lần; đủ 5 người là hộp đóng!", markup);
     }
 
     private void claimAdminLixi(long chatId, User user, String queryId) {
@@ -1890,17 +1871,12 @@ public class CasinoBot extends TelegramLongPollingBot {
                 answerAlert(queryId, "⚠️ Bạn đã nhận lì xì từ hộp này rồi!");
                 return;
             }
-            if (Database.getBalance(user.getId()) > 8_000_000_000L) {
-                answerAlert(queryId, "⚠️ Số dư trên 8B không được nhận lì xì!");
-                return;
-            }
             box.claimedUsers.add(user.getId());
             Database.changeBalance(user.getId(), ADMIN_LIXI_REWARD);
             int claimed = box.claimedUsers.size();
             if (claimed >= ADMIN_LIXI_WINNERS) {
                 box.closed = true;
                 adminLixiBoxes.remove(chatId, box);
-                deleteMessage(chatId, box.messageId);
             }
             answerAlert(queryId, "🎉 Bạn nhận thành công 3B lì xì!");
             sendMessage(chatId, "🧧 " + getMention(user.getId(), user.getFirstName()) + " đã nhận lì xì <b>3B</b>! (" + claimed + "/" + ADMIN_LIXI_WINNERS + " suất)");
@@ -1919,10 +1895,6 @@ public class CasinoBot extends TelegramLongPollingBot {
             return;
         }
 
-        if (Database.getBalance(user.getId()) > 8_000_000_000L) {
-            answerAlert(queryId, "⚠️ Số dư trên 8B không được nhận lì xì!");
-            return;
-        }
 
         if (session.clickedUsers.contains(user.getId())) {
             answerAlert(queryId, "⚠️ Bạn đã mở lì xì ván này rồi!");
@@ -2002,7 +1974,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         }
 
         boolean isAdmin = ADMIN_IDS.contains(senderId);
-        boolean isVip = Database.isVip(senderId);
+        boolean isVip = isVipActive(senderId);
 
         if (!isAdmin && !isVip && amount > 2_000_000_000L) {
             sendMessage(message.getChatId(), "⚠️ Người dùng thường chỉ được chuyển tối đa <b>2B</b> mỗi lần!");
@@ -2018,6 +1990,48 @@ public class CasinoBot extends TelegramLongPollingBot {
         Database.changeBalance(receiverId, amount);
 
         sendMessage(message.getChatId(), "💸 Chuyển thành công " + formatDetailedMoney(amount) + " đ. cho " + getMention(receiverId, message.getReplyToMessage().getFrom().getFirstName()) + "!");
+    }
+
+    private boolean isVipActive(long userId) {
+        Long until = temporaryVipUntil.get(userId);
+        if (until != null) {
+            if (until > System.currentTimeMillis()) return true;
+            temporaryVipUntil.remove(userId, until);
+        }
+        return Database.isVip(userId);
+    }
+
+    private synchronized void handleYeubi(Message message) {
+        long uid = message.getFrom().getId();
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Ho_Chi_Minh"));
+        Map<Long, String> uses = new HashMap<>();
+        try {
+            if (Files.exists(YEUBI_FILE)) {
+                for (String line : Files.readAllLines(YEUBI_FILE, StandardCharsets.UTF_8)) {
+                    String[] parts = line.trim().split("\\|");
+                    if (parts.length == 2) try { uses.put(Long.parseLong(parts[0]), parts[1]); } catch (NumberFormatException ignored) { }
+                }
+            }
+        } catch (IOException e) {
+            sendMessage(message.getChatId(), "❌ Không đọc được dữ liệu /yeubi. Vui lòng thử lại.");
+            return;
+        }
+        if (today.toString().equals(uses.get(uid))) {
+            sendMessage(message.getChatId(), "⚠️ Bạn đã dùng /yeubi hôm nay rồi. Mỗi ngày chỉ được dùng 1 lần.");
+            return;
+        }
+        uses.put(uid, today.toString());
+        List<String> lines = new ArrayList<>();
+        uses.forEach((id, date) -> lines.add(id + "|" + date));
+        try {
+            Files.write(YEUBI_FILE, lines, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            sendMessage(message.getChatId(), "❌ Không lưu được lượt dùng /yeubi. Vui lòng thử lại.");
+            return;
+        }
+        long until = System.currentTimeMillis() + 30 * 60 * 1000L;
+        temporaryVipUntil.put(uid, until);
+        sendMessage(message.getChatId(), "💖 <b>KÍCH HOẠT VIP TẠM THỜI THÀNH CÔNG!</b>\n⭐ Bạn được dùng quyền VIP trong <b>30 phút</b>.\n📅 /yeubi chỉ dùng được <b>1 lần mỗi ngày</b>.");
     }
 
     private void handleSetVip(Message message, boolean status) {
