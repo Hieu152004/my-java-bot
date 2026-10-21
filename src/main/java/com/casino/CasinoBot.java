@@ -2656,8 +2656,8 @@ public class CasinoBot extends TelegramLongPollingBot {
         boolean isAdmin = ADMIN_IDS.contains(senderId);
         boolean isVip = Database.isVip(senderId);
 
-        if (!isAdmin && !isVip && amount > 5_000_000_000L) {
-            sendMessage(message.getChatId(), "⚠️ Người dùng thường chỉ được chuyển tối đa <b>5B</b> mỗi lần!");
+        if (!isAdmin && !isVip && amount > 2_000_000_000L) {
+            sendMessage(message.getChatId(), "⚠️ Người dùng thường chỉ được chuyển tối đa <b>2B</b> mỗi lần!");
             return;
         }
 
