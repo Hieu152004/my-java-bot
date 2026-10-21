@@ -718,8 +718,8 @@ public class CasinoBot extends TelegramLongPollingBot {
         }
 
         boolean custom = icon.startsWith("CUSTOM:");
-        if ((!custom && (icon.length() > 16 || icon.contains("<") || icon.contains(">") || icon.contains("&") || icon.contains("|")))
-                || (custom && !icon.substring(7).matches("[0-9]+"))) {
+        if ((!custom && (icon.codePointCount(0, icon.length()) > 10 || icon.contains("<") || icon.contains(">") || icon.contains("&") || icon.contains("|")))
+                || (custom && !icon.substring(7, Math.min(icon.indexOf('|'), icon.length())).matches("[0-9]+"))) {
             sendMessage(chatId, "❌ Icon không hợp lệ. Hãy gửi một emoji ngắn hoặc emoji Premium.");
             return;
         }
