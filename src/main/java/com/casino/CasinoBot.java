@@ -51,27 +51,13 @@ public class CasinoBot extends TelegramLongPollingBot {
     private static final Set<Long> KNOWN_GROUP_IDS = ConcurrentHashMap.newKeySet();
     private static final Path KNOWN_GROUPS_FILE = Paths.get("known_groups.txt");
     private static final Path CHECKIN_FILE = Paths.get("diemdanh_data.txt");
-    private static final long DIEM_DANH_REWARD = 10_000_000_000L;
+    private static final long DIEM_DANH_REWARD = 5_000_000_000L;
     private static final long DIEM_DANH_BALANCE_LIMIT = 5_000_000_000L;
-    private static final Path ICON_FILE = Paths.get("icone_data.txt");
-    private static final Map<Long, String> PLAYER_ICONS = new ConcurrentHashMap<>();
     private final Map<Long, Long> temporaryVipUntil = new ConcurrentHashMap<>();
     private final Set<Long> checkinLocks = ConcurrentHashMap.newKeySet();
 
     static {
         try {
-            if (Files.exists(ICON_FILE)) {
-                for (String line : Files.readAllLines(ICON_FILE, StandardCharsets.UTF_8)) {
-                    String[] parts = line.split("\\|", 2);
-                    if (parts.length == 2) {
-                        try {
-                            long id = Long.parseLong(parts[0].trim());
-                            String icon = parts[1].trim();
-                            if (!icon.isEmpty()) PLAYER_ICONS.put(id, icon);
-                        } catch (NumberFormatException ignored) { }
-                    }
-                }
-            }
             if (Files.exists(KNOWN_GROUPS_FILE)) {
                 for (String line : Files.readAllLines(KNOWN_GROUPS_FILE, StandardCharsets.UTF_8)) {
                     try { KNOWN_GROUP_IDS.add(Long.parseLong(line.trim())); }
@@ -399,7 +385,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         records.forEach((id, value) -> lines.add(id + "|" + value[0] + "|" + value[1]));
         try { Files.write(CHECKIN_FILE, lines, StandardCharsets.UTF_8); }
         catch (IOException e) { Database.changeBalance(uid, -DIEM_DANH_REWARD); sendMessage(message.getChatId(), "❌ Không lưu được lượt điểm danh, tiền thưởng đã được hoàn lại. Kiểm tra ổ lưu trữ của bot."); return; }
-        sendMessage(message.getChatId(), "✅ <b>ĐIỂM DANH THÀNH CÔNG!</b>\n🎁 Nhận: <b>10B</b>\n🔓 Không giới hạn số lần, miễn số dư trước khi nhận dưới 5B.\n💰 Số dư: <b>" + formatDetailedMoney(Database.getBalance(uid)) + " đ.</b>");
+        sendMessage(message.getChatId(), "✅ <b>ĐIỂM DANH THÀNH CÔNG!</b>\n🎁 Nhận: <b>5B</b>\n🔓 Không giới hạn số lần, miễn số dư trước khi nhận dưới 5B.\n💰 Số dư: <b>" + formatDetailedMoney(Database.getBalance(uid)) + " đ.</b>");
     }
 
     private void handleMessage(Message message) {
@@ -435,8 +421,6 @@ public class CasinoBot extends TelegramLongPollingBot {
             sendMainMenu(chatId);
         } else if (text.matches("(?i)^/yeubi(?:@\\w+)?$")) {
             handleYeubi(message);
-        } else if (text.matches("(?is)^/seticon(?:@\\w+)?(?:\\s|$).*")) {
-            handleSetIcon(message);
         } else if (text.matches("(?i)^/sodu(?:@\\w+)?$")) {
             long balance = Database.getBalance(user.getId());
             sendMessage(chatId, "💰 <b>SỐ DƯ HIỆN TẠI</b>\n👤 " + escapeHtml(displayName(user)) + "\n💵 Số dư: <b>" + formatDetailedMoney(balance) + " đ.</b>");
@@ -628,7 +612,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             answerAlert(query.getId(), "📊 Đang tải bảng xếp hạng...");
             long[] admins = ADMIN_IDS.stream().mapToLong(l -> l).toArray();
             telegramExecutor.execute(() -> {
-                String top = addIconsToLeaderboard(Database.getTopText(admins));
+                String top = Database.getTopText(admins);
                 sendMessage(chatId, top);
             });
         }
@@ -640,135 +624,7 @@ public class CasinoBot extends TelegramLongPollingBot {
                            .replace("<", "&lt;")
                            .replace(">", "&gt;")
                            .replace("\"", "&quot;");
-        String icon = PLAYER_ICONS.getOrDefault(userId, "");
-        String prefix = icon.isEmpty() ? "" : renderPlayerIcon(icon) + " ";
-        return String.format("<a href=\"tg://user?id=%d\">%s%s</a>", userId, prefix, safeName);
-    }
-
-    private String renderPlayerIcon(String icon) {
-        if (icon != null && icon.startsWith("CUSTOM:")) {
-            String sub = icon.substring("CUSTOM:".length());
-            String[] parts = sub.split("\\|", 2);
-            String emojiId = parts[0].trim();
-            String emojiChar = (parts.length > 1 && !parts[1].isBlank()) ? parts[1].trim() : "⭐";
-            
-            if (emojiId.matches("[0-9]+")) {
-                return "<tg-emoji emoji-id=\"" + emojiId + "\">" + escapeHtml(emojiChar) + "</tg-emoji>";
-            }
-        }
-        return escapeHtml(icon == null ? "" : icon);
-    }
-
-    private synchronized void handleSetIcon(Message message) {
-        long chatId = message.getChatId();
-        if (!ADMIN_IDS.contains(message.getFrom().getId())) {
-            sendMessage(chatId, "⛔ Chỉ admin mới được sử dụng /seticon.");
-            return;
-        }
-
-        String text = message.getText() == null ? "" : message.getText().trim();
-        String[] parts = text.split("\\s+");
-        Long targetId = null;
-        String icon = null;
-
-        // Reply vào tin nhắn người chơi rồi gửi /seticon kèm emoji.
-        if (message.getReplyToMessage() != null) {
-            targetId = message.getReplyToMessage().getFrom().getId();
-        } else if (parts.length >= 2) {
-            try { targetId = Long.parseLong(parts[1]); }
-            catch (NumberFormatException ignored) { }
-        }
-
-        // Custom emoji phải lấy ID và ký tự hiển thị thực tế từ MessageEntity
-        if (message.getEntities() != null) {
-            for (MessageEntity entity : message.getEntities()) {
-                if (entity != null && "custom_emoji".equalsIgnoreCase(entity.getType())
-                        && entity.getCustomEmojiId() != null && !entity.getCustomEmojiId().isBlank()) {
-                    
-                    String emojiChar = "⭐";
-                    if (message.getText() != null && entity.getOffset() >= 0 
-                            && entity.getOffset() + entity.getLength() <= message.getText().length()) {
-                        emojiChar = message.getText().substring(entity.getOffset(), entity.getOffset() + entity.getLength());
-                    }
-                    
-                    icon = "CUSTOM:" + entity.getCustomEmojiId() + "|" + emojiChar;
-                    break;
-                }
-            }
-        }
-
-        if (icon == null) {
-            if (message.getReplyToMessage() != null && parts.length >= 1) {
-                icon = parts[0].startsWith("/") ? (parts.length >= 2 ? parts[1] : null) : parts[0];
-            } else if (parts.length >= 2) {
-                icon = parts[parts.length - 1];
-            }
-        }
-
-        if (targetId == null && message.getReplyToMessage() != null) {
-            targetId = message.getReplyToMessage().getFrom().getId();
-        }
-
-        if (targetId == null || icon == null || icon.isBlank()) {
-            sendMessage(chatId, "📝 <b>Cách dùng /seticon</b>\n• Reply tin nhắn người chơi rồi nhập <code>/seticon 👑</code> (emoji thường hoặc emoji Premium).\n• Hoặc nhập <code>/seticon 123456789 👑</code>.\n• Gỡ icon: dùng <code>off</code> thay icon.");
-            return;
-        }
-
-        if (icon.equalsIgnoreCase("off") || icon.equalsIgnoreCase("xoa") || icon.equals("-")) {
-            String oldIcon = PLAYER_ICONS.remove(targetId);
-            if (savePlayerIcons()) {
-                sendMessage(chatId, "✅ Đã gỡ icon của người chơi ID <code>" + targetId + "</code>.");
-            } else {
-                if (oldIcon != null) PLAYER_ICONS.put(targetId, oldIcon);
-                sendMessage(chatId, "❌ Không lưu được thay đổi icon. Vui lòng kiểm tra ổ lưu trữ.");
-            }
-            return;
-        }
-
-        boolean custom = icon.startsWith("CUSTOM:");
-        if ((!custom && (icon.codePointCount(0, icon.length()) > 15 || icon.contains("<") || icon.contains(">") || icon.contains("&") || icon.contains("|")))
-                || (custom && !icon.substring(7, Math.min(icon.indexOf('|'), icon.length())).matches("[0-9]+"))) {
-            sendMessage(chatId, "❌ Icon không hợp lệ. Hãy gửi một emoji ngắn hoặc emoji Premium.");
-            return;
-        }
-
-        String oldIcon = PLAYER_ICONS.put(targetId, icon);
-        if (savePlayerIcons()) {
-            sendMessage(chatId, "✅ Đã đặt icon trước tên người chơi ID <code>" + targetId + "</code> trên BXH và các thông báo có tên.");
-        } else {
-            if (oldIcon == null) PLAYER_ICONS.remove(targetId);
-            else PLAYER_ICONS.put(targetId, oldIcon);
-            sendMessage(chatId, "❌ Không lưu được icon. Vui lòng kiểm tra ổ lưu trữ.");
-        }
-    }
-
-    private synchronized boolean savePlayerIcons() {
-        try {
-            List<String> rows = new ArrayList<>();
-            PLAYER_ICONS.forEach((id, icon) -> rows.add(id + "|" + icon));
-            Files.write(ICON_FILE, rows, StandardCharsets.UTF_8);
-            return true;
-        } catch (IOException e) {
-            System.err.println("[ICON] Không lưu được danh sách icon: " + e.getMessage());
-            return false;
-        }
-    }
-
-    private String addIconsToLeaderboard(String topText) {
-        if (topText == null || PLAYER_ICONS.isEmpty()) return topText;
-        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("(<a href=\\\"tg://user\\?id=(\\d+)\\\">)");
-        java.util.regex.Matcher matcher = pattern.matcher(topText);
-        StringBuffer out = new StringBuffer();
-        while (matcher.find()) {
-            long id;
-            try { id = Long.parseLong(matcher.group(2)); }
-            catch (NumberFormatException e) { continue; }
-            String icon = PLAYER_ICONS.get(id);
-            String replacement = matcher.group(1) + (icon == null || icon.isBlank() ? "" : renderPlayerIcon(icon) + " ");
-            matcher.appendReplacement(out, java.util.regex.Matcher.quoteReplacement(replacement));
-        }
-        matcher.appendTail(out);
-        return out.toString();
+        return String.format("<a href=\"tg://user?id=%d\">%s</a>", userId, safeName);
     }
 
     private void createDiceGame(long chatId) {
@@ -832,10 +688,8 @@ public class CasinoBot extends TelegramLongPollingBot {
                 for (Bet bet : game.bets.values()) {
                     String icon = bet.side.equals("T") ? "🔴" : "🔵";
                     String sideName = bet.side.equals("T") ? "Tài" : "Xỉu";
-                    String playerIcon = PLAYER_ICONS.getOrDefault(bet.userId, "");
-                    sb.append(idx).append("- ").append(icon).append(" ");
-                    if (!playerIcon.isEmpty()) sb.append(renderPlayerIcon(playerIcon)).append(" ");
-                    sb.append(escapeHtml(bet.name == null ? "Người chơi" : bet.name))
+                    sb.append(idx).append("- ").append(icon).append(" ")
+                      .append(escapeHtml(bet.name == null ? "Người chơi" : bet.name))
                       .append(" → ").append(sideName).append(": ").append(formatDetailedMoney(bet.amount)).append(" đ.\n");
                     idx++;
                 }
@@ -1270,8 +1124,18 @@ public class CasinoBot extends TelegramLongPollingBot {
             return;
         }
 
-        HandScore score = evaluateHand(hand);
-        String cardsStr = hand.get(0) + " " + hand.get(1) + " " + hand.get(2);
+        // Chụp đúng 3 lá của người chơi rồi dùng cùng evaluateHand() như lúc chấm kết quả.
+        List<Card> handSnapshot;
+        synchronized (game) {
+            List<Card> currentHand = game.cards.get(user.getId());
+            if (currentHand == null || currentHand.size() != 3) {
+                answerAlert(queryId, "❌ Không đọc được đủ 3 lá bài của bạn.");
+                return;
+            }
+            handSnapshot = new ArrayList<>(currentHand);
+        }
+        HandScore score = evaluateHand(handSnapshot);
+        String cardsStr = handSnapshot.get(0) + " " + handSnapshot.get(1) + " " + handSnapshot.get(2);
         answerAlert(queryId, "🃏 Bài của bạn: [ " + cardsStr + " ]\n📊 Loại bài: " + score.description);
     }
 
@@ -2214,7 +2078,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         sendMessage(message.getChatId(), "🔻 Đã trừ " + formatDetailedMoney(amount) + " đ. của " + getMention(targetId, message.getReplyToMessage().getFrom().getFirstName()));
     }
 
-    private String displayName(User u) { String n=((u.getFirstName()==null?"":u.getFirstName())+" "+(u.getLastName()==null?"":u.getLastName())).trim(); if(n.isEmpty()) n="Người chơi"; String icon=PLAYER_ICONS.getOrDefault(u.getId(), ""); return icon.isEmpty()?n:renderPlayerIcon(icon)+" "+n; }
+    private String displayName(User u) { String n=((u.getFirstName()==null?"":u.getFirstName())+" "+(u.getLastName()==null?"":u.getLastName())).trim(); return n.isEmpty()?"Người chơi":n; }
     private boolean isTen(Card c){return c.rank.equals("10")||c.rank.equals("J")||c.rank.equals("Q")||c.rank.equals("K");}
     
     private String escapeHtml(String s) {
