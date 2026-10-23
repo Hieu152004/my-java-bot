@@ -85,7 +85,7 @@ public class CasinoBot extends TelegramLongPollingBot {
     private final Map<Long, BaiCaoGame> baicaoGames = new ConcurrentHashMap<>();
     private final Map<Long, LixiSession> lixiSessions = new ConcurrentHashMap<>();
     private final Map<Long, AdminLixiBox> adminLixiBoxes = new ConcurrentHashMap<>();
-    private static final long ADMIN_LIXI_REWARD = 3_000_000_000L;
+    private static final long ADMIN_LIXI_REWARD = 30_000_000_000L;
     private static final int ADMIN_LIXI_WINNERS = 5;
     private final Map<Long, Long> lastLixiWinners = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Long, Integer> lastMenuMessageIds = new ConcurrentHashMap<>();
@@ -613,7 +613,20 @@ public class CasinoBot extends TelegramLongPollingBot {
             long[] admins = ADMIN_IDS.stream().mapToLong(l -> l).toArray();
             telegramExecutor.execute(() -> {
                 String top = Database.getTopText(admins);
-                sendMessage(chatId, top);
+                java.util.regex.Matcher vipMatcher = java.util.regex.Pattern
+                        .compile("<a href=\"tg://user\\?id=(\\d+)\">([^<]*)</a>")
+                        .matcher(top);
+                StringBuffer vipTop = new StringBuffer();
+                while (vipMatcher.find()) {
+                    long topUserId = Long.parseLong(vipMatcher.group(1));
+                    String replacement = vipMatcher.group(0);
+                    if (isVipActive(topUserId)) {
+                        replacement = "⭐ <b>VIP</b> " + replacement;
+                    }
+                    vipMatcher.appendReplacement(vipTop, java.util.regex.Matcher.quoteReplacement(replacement));
+                }
+                vipMatcher.appendTail(vipTop);
+                sendMessage(chatId, vipTop.toString());
             });
         }
     }
@@ -624,7 +637,11 @@ public class CasinoBot extends TelegramLongPollingBot {
                            .replace("<", "&lt;")
                            .replace(">", "&gt;")
                            .replace("\"", "&quot;");
-        return String.format("<a href=\"tg://user?id=%d\">%s</a>", userId, safeName);
+        String vipPrefix = "";
+        try {
+            if (isVipActive(userId)) vipPrefix = "⭐ <b>VIP</b> ";
+        } catch (Exception ignored) { }
+        return String.format("%s<a href=\"tg://user?id=%d\">%s</a>", vipPrefix, userId, safeName);
     }
 
     private void createDiceGame(long chatId) {
@@ -1873,9 +1890,9 @@ public class CasinoBot extends TelegramLongPollingBot {
         AdminLixiBox box = new AdminLixiBox();
         adminLixiBoxes.put(chatId, box);
         InlineKeyboardMarkup markup = new InlineKeyboardMarkup(List.of(List.of(
-                createBtn("🧧 NHẬN LÌ XÌ 3B (CÒN 5 SUẤT)", "admin_lixi_claim")
+                createBtn("🧧 NHẬN LÌ XÌ 30B (CÒN 5 SUẤT)", "admin_lixi_claim")
         )));
-        sendMessageWithMarkup(chatId, "🎁 <b>HỘP QUÀ LÌ XÌ ĐÃ MỞ!</b>\n\n🧧 Có <b>5 suất</b>, mỗi người nhận thành công được <b>3B</b>.\n👆 Bấm nút bên dưới để nhận quà. Mỗi người chỉ nhận được 1 lần; đủ 5 người là hộp đóng!", markup);
+        sendMessageWithMarkup(chatId, "🎁 <b>HỘP QUÀ LÌ XÌ ĐÃ MỞ!</b>\n\n🧧 Có <b>5 suất</b>, mỗi người nhận thành công được <b>30B</b>.\n👆 Bấm nút bên dưới để nhận quà. Mỗi người chỉ nhận được 1 lần; đủ 5 người là hộp đóng!", markup);
     }
 
     private void claimAdminLixi(long chatId, User user, String queryId) {
@@ -1898,8 +1915,8 @@ public class CasinoBot extends TelegramLongPollingBot {
                 box.closed = true;
                 adminLixiBoxes.remove(chatId, box);
             }
-            answerAlert(queryId, "🎉 Bạn nhận thành công 3B lì xì!");
-            sendMessage(chatId, "🧧 " + getMention(user.getId(), user.getFirstName()) + " đã nhận lì xì <b>3B</b>! (" + claimed + "/" + ADMIN_LIXI_WINNERS + " suất)");
+            answerAlert(queryId, "🎉 Bạn nhận thành công 30B lì xì!");
+            sendMessage(chatId, "🧧 " + getMention(user.getId(), user.getFirstName()) + " đã nhận lì xì <b>30B</b>! (" + claimed + "/" + ADMIN_LIXI_WINNERS + " suất)");
         }
     }
 
