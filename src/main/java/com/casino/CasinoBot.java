@@ -925,6 +925,16 @@ public class CasinoBot extends TelegramLongPollingBot {
     private void startBaiCaoGame(long chatId) {
         BaiCaoGame game = baicaoGames.get(chatId);
         if (game == null) return;
+
+        // Khóa toàn bộ quá trình bắt đầu ván: nếu timeout và nút CHIA BÀI chạy
+        // đồng thời, chỉ luồng đầu tiên được phép tạo phiên và chia bộ bài.
+        synchronized (game) {
+            if (game.playing || game.sessionId != null) {
+                System.out.println("[BAITO] Bỏ qua yêu cầu chia trùng. session="
+                        + game.sessionId + ", chatId=" + chatId);
+                return;
+            }
+
         // Mã phiên riêng để đối chiếu bài đã chia, bài xem trong ván và kết quả cuối.
         game.sessionId = "BT-" + java.time.LocalDateTime.now(ZoneId.of("Asia/Ho_Chi_Minh")).format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
                 + "-" + Long.toString(Math.abs(ThreadLocalRandom.current().nextLong()) % 10000, 10);
@@ -1000,6 +1010,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         }
 
         sendBaiCaoPlayingMessage(chatId);
+        } // synchronized (game): ván và bộ bài đã được khởi tạo nguyên tử
     }
 
     private void sendBaiCaoPlayingMessage(long chatId) {
