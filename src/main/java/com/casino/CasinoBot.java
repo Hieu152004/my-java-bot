@@ -143,10 +143,10 @@ public class CasinoBot extends TelegramLongPollingBot {
     }
 
     private static class Card implements Comparable<Card> {
-        String rank;
-        String suit;
-        int rankValue;
-        int suitValue;
+        final String rank;
+        final String suit;
+        final int rankValue;
+        final int suitValue;
 
         Card(String rank, String suit) {
             this.rank = rank;
@@ -218,6 +218,7 @@ public class CasinoBot extends TelegramLongPollingBot {
     private static class BaiCaoGame {
         long hostId;
         long betAmount;
+        String sessionId;
         Map<Long, String> players = new ConcurrentHashMap<>();
         List<Long> playerOrder = new ArrayList<>();
         Integer messageId = null;
@@ -231,6 +232,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         long totalPot = 0;
         Map<Long, Long> playerBets = new ConcurrentHashMap<>();
         Map<Long, List<Card>> cards = new ConcurrentHashMap<>();
+        Map<Long, HandScore> evaluatedHands = new ConcurrentHashMap<>();
         Set<Long> folded = ConcurrentHashMap.newKeySet();
         Set<Long> allInPlayers = ConcurrentHashMap.newKeySet();
         
@@ -923,6 +925,9 @@ public class CasinoBot extends TelegramLongPollingBot {
     private void startBaiCaoGame(long chatId) {
         BaiCaoGame game = baicaoGames.get(chatId);
         if (game == null) return;
+        // Mã phiên riêng để đối chiếu bài đã chia, bài xem trong ván và kết quả cuối.
+        game.sessionId = "BT-" + java.time.LocalDateTime.now(ZoneId.of("Asia/Ho_Chi_Minh")).format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
+                + "-" + Long.toString(Math.abs(ThreadLocalRandom.current().nextLong()) % 10000, 10);
 
         if (!tryDeductBalances(game.playerOrder, game.betAmount)) {
             sendMessage(chatId, "❌ Không thể bắt đầu Bài Tố: có người không còn đủ tiền cược sàn. Ván đã được hủy, không ai bị trừ tiền.");
@@ -958,7 +963,40 @@ public class CasinoBot extends TelegramLongPollingBot {
             hand.add(deck.remove(0));
             hand.add(deck.remove(0));
             hand.add(deck.remove(0));
-            game.cards.put(pId, hand);
+            // Lưu đúng một bộ 3 lá bất biến cho cả XEM BÀI và kết quả cuối ván.
+            // Không cho bất kỳ luồng nào thay đổi danh sách lá sau khi đã chia.
+            List<Card> fixedHand = Collections.unmodifiableList(new ArrayList<>(hand));
+            game.cards.put(pId, fixedHand);
+            // Chấm điểm từ chính bộ bài đã lưu, chỉ một lần duy nhất.
+            game.evaluatedHands.put(pId, evaluateHand(fixedHand));
+        }
+
+        // Gửi bản đối chiếu riêng cho từng người ngay sau khi chia xong.
+        // Nội dung dùng chính fixedHand đã lưu, không rút hoặc tạo bài mới.
+        for (long pId : game.playerOrder) {
+            List<Card> dealtHand = game.cards.get(pId);
+            if (dealtHand != null) {
+                String playerName = game.players.getOrDefault(pId, "Người chơi");
+                String cardsText = dealtHand.get(0) + " " + dealtHand.get(1) + " " + dealtHand.get(2);
+                String privateText = "🧾 <b>BẢN ĐỐI CHIẾU CHIA BÀI BÀI TỐ</b>\n"
+                        + "🔖 Mã phiên: <code>" + game.sessionId + "</code>\n"
+                        + "👤 Người chơi: " + escapeHtml(playerName) + "\n"
+                        + "🃏 3 lá đã chia: <b>[ " + cardsText + " ]</b>\n"
+                        + "ℹ️ Đây là bản ghi để so sánh với nút XEM BÀI trong nhóm và kết quả cuối ván.";
+                SendMessage privateMsg = new SendMessage();
+                privateMsg.setChatId(String.valueOf(pId));
+                privateMsg.setText(privateText);
+                privateMsg.setParseMode("HTML");
+                telegramExecutor.execute(() -> {
+                    try {
+                        execute(privateMsg);
+                    } catch (TelegramApiException e) {
+                        System.err.println("[BAITO] Không gửi được bài riêng. session=" + game.sessionId
+                                + ", userId=" + pId + ", lỗi=" + e.getMessage()
+                                + " (người chơi cần mở chat riêng với bot và bấm Start trước).");
+                    }
+                });
+            }
         }
 
         sendBaiCaoPlayingMessage(chatId);
@@ -1024,7 +1062,8 @@ public class CasinoBot extends TelegramLongPollingBot {
         String currentMention = getMention(currentUserId, game.players.get(currentUserId));
 
         StringBuilder sb = new StringBuilder();
-        sb.append("🃏 <b>BÀN BÀI TỐ ĐANG DIỄN RA</b>\n\n");
+        sb.append("🃏 <b>BÀN BÀI TỐ ĐANG DIỄN RA</b>\n");
+        sb.append("🔖 <b>Mã phiên:</b> <code>").append(escapeHtml(game.sessionId == null ? "chưa có mã" : game.sessionId)).append("</code>\n\n");
         sb.append("🏆 <b>Tổng Hũ:</b> ").append(formatDetailedMoney(game.totalPot)).append(" đ.\n");
         sb.append("👉 <b>Đến lượt:</b> ").append(currentMention).append(" (⏳ ").append(Math.max(0, remainingSeconds)).append("s)\n\n");
         sb.append("📋 <b>Trạng thái bàn:</b>");
@@ -1117,15 +1156,17 @@ public class CasinoBot extends TelegramLongPollingBot {
             return;
         }
 
+        // Đọc đúng bộ bài cố định đã chia; thao tác xem bài không rút/chia lại.
         List<Card> hand = game.cards.get(user.getId());
         if (hand == null) {
             answerAlert(queryId, "❌ Bạn không có bài trong ván này!");
             return;
         }
 
-        HandScore score = evaluateHand(hand);
+        HandScore score = game.evaluatedHands.computeIfAbsent(user.getId(), id -> evaluateHand(hand));
         String cardsStr = hand.get(0) + " " + hand.get(1) + " " + hand.get(2);
-        answerAlert(queryId, "🃏 Bài của bạn: [ " + cardsStr + " ]\n📊 Loại bài: " + score.description);
+        answerAlert(queryId, "🔖 Phiên: " + (game.sessionId == null ? "chưa có mã" : game.sessionId)
+                + "\n🃏 Bài của bạn: [ " + cardsStr + " ]\n📊 Loại bài: " + score.description);
     }
 
     private void handleBaiCaoAction(long chatId, User user, String action, long param, String queryId) {
@@ -1496,10 +1537,11 @@ public class CasinoBot extends TelegramLongPollingBot {
             }
 
             long absoluteWinnerId = activePlayers.isEmpty() ? game.playerOrder.get(0) : findBestHandWinners(game, activePlayers).get(0);
-            HandScore maxSc = evaluateHand(game.cards.get(absoluteWinnerId));
+            HandScore maxSc = game.evaluatedHands.computeIfAbsent(absoluteWinnerId, id -> evaluateHand(game.cards.get(id)));
 
             StringBuilder winMsg = new StringBuilder();
-            winMsg.append("🏆 <b>KẾT THÚC VÁN BÀI TỐ</b>\n\n");
+            winMsg.append("🏆 <b>KẾT THÚC VÁN BÀI TỐ</b>\n");
+            winMsg.append("🔖 <b>Mã phiên:</b> <code>").append(escapeHtml(game.sessionId == null ? "chưa có mã" : game.sessionId)).append("</code>\n\n");
             winMsg.append("👑 <b>Người chiến thắng:</b> ").append(getMention(absoluteWinnerId, game.players.get(absoluteWinnerId))).append("\n");
             winMsg.append("💰 <b>Tổng hũ:</b> ").append(formatDetailedMoney(game.totalPot)).append(" đ.\n");
             if (returnedUncalled > 0) {
@@ -1510,7 +1552,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             for (long pId : game.playerOrder) {
                 List<Card> h = game.cards.get(pId);
                 if (h == null) continue;
-                HandScore sc = evaluateHand(h);
+                HandScore sc = game.evaluatedHands.computeIfAbsent(pId, id -> evaluateHand(h));
                 String statusNote = game.folded.contains(pId) ? " (Đã úp bài)" : " — <b>" + sc.description + "</b>";
                 winMsg.append("\n- ").append(getMention(pId, game.players.get(pId)))
                       .append(": [ ").append(h.get(0)).append(" ").append(h.get(1)).append(" ").append(h.get(2)).append(" ]")
@@ -1580,7 +1622,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         if (eligible == null || eligible.isEmpty()) return winners;
         HandScore best = null;
         for (long pId : eligible) {
-            HandScore sc = evaluateHand(game.cards.get(pId));
+            HandScore sc = game.evaluatedHands.computeIfAbsent(pId, id -> evaluateHand(game.cards.get(id)));
             if (best == null || sc.compareTo(best) > 0) {
                 best = sc;
                 winners.clear();
