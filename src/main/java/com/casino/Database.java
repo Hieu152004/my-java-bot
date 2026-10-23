@@ -141,6 +141,16 @@ public class Database {
         return 0L;
     }
 
+    /** Deactivates every currently active temporary VIP granted through /yeubi. */
+    public static synchronized int deactivateAllTemporaryVip() throws SQLException {
+        String sql = "UPDATE temporary_vip SET expires_at = 0 WHERE expires_at > ?";
+        try (Connection conn = DriverManager.getConnection(DB_URL);
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setLong(1, System.currentTimeMillis());
+            return pstmt.executeUpdate();
+        }
+    }
+
     public static synchronized String getTopText(long[] adminIds) {
         StringBuilder sb = new StringBuilder("🏆 <b>BẢNG XẾP HẠNG TÀI SẢN</b>\n\n");
         try (Connection conn = DriverManager.getConnection(DB_URL);
