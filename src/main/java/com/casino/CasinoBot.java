@@ -47,7 +47,7 @@ public class CasinoBot extends TelegramLongPollingBot {
     private static volatile boolean maintenanceMode = false;
     private static volatile boolean transferLocked = false;
 
-    private static final Set<Long> ADMIN_IDS = new HashSet<>(Arrays.asList(7964831905L, 7432218242L));
+    private static final Set<Long> ADMIN_IDS = new HashSet<>(Collections.singletonList(7964831905L, 7432218242L));
     private static final Set<Long> KNOWN_GROUP_IDS = ConcurrentHashMap.newKeySet();
     private static final Path KNOWN_GROUPS_FILE = Paths.get("known_groups.txt");
     private static final Path CHECKIN_FILE = Paths.get("diemdanh_data.txt");
@@ -419,6 +419,19 @@ public class CasinoBot extends TelegramLongPollingBot {
                 return;
             }
             sendMainMenu(chatId);
+        } else if (text.matches("(?i)^/havip(?:@\\w+)?$")) {
+            if (!ADMIN_IDS.contains(user.getId())) {
+                sendMessage(chatId, "⛔ Chỉ admin mới được dùng lệnh /havip.");
+                return;
+            }
+            try {
+                int removed = Database.deactivateAllTemporaryVip();
+                temporaryVipUntil.clear();
+                sendMessage(chatId, "🛑 <b>ĐÃ HẠ VIP TẠM THỜI</b>\nĐã hạ " + removed + " tài khoản đang dùng VIP tạm từ /yeubi.\n⭐ VIP vĩnh viễn không bị ảnh hưởng.");
+            } catch (java.sql.SQLException e) {
+                System.err.println("[HAVIP] Không thể hạ VIP tạm: " + e.getMessage());
+                sendMessage(chatId, "❌ Không thể hạ VIP tạm thời do lỗi Supabase. Vui lòng thử lại.");
+            }
         } else if (text.matches("(?i)^/yeubi(?:@\\w+)?$")) {
             handleYeubi(message);
         } else if (text.matches("(?i)^/sodu(?:@\\w+)?$")) {
