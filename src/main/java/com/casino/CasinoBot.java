@@ -2046,7 +2046,7 @@ public class CasinoBot extends TelegramLongPollingBot {
                 return;
             }
             temporaryVipUntil.put(uid, until);
-            sendMessage(message.getChatId(), "💖 <b>KÍCH HOẠT VIP TẠM THỜI THÀNH CÔNG!</b>\\n⭐ Bạn được dùng quyền VIP trong <b>30 phút</b>.\\n📅 /yeubi chỉ dùng được <b>1 lần mỗi ngày</b>.");
+            sendMessage(message.getChatId(), "💖 <b>KÍCH HOẠT VIP TẠM THỜI THÀNH CÔNG!</b>\n⭐ Bạn được dùng quyền VIP trong <b>30 phút</b>.\n📅 /yeubi chỉ dùng được <b>1 lần mỗi ngày</b>.");
         } catch (java.sql.SQLException e) {
             System.err.println("[YEUBI] Không lưu được VIP tạm vào Supabase: " + e.getMessage());
             sendMessage(message.getChatId(), "❌ Không kết nối được Supabase để lưu /yeubi. Chưa kích hoạt VIP, vui lòng thử lại.");
