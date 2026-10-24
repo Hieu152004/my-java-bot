@@ -524,7 +524,7 @@ public class CasinoBot extends TelegramLongPollingBot {
                     if (bai.lobbyCountdown != null) bai.lobbyCountdown.cancel(true);
                     if (bai.turnCountdown != null) bai.turnCountdown.cancel(true);
                     for (Map.Entry<Long, Long> entry : bai.playerBets.entrySet()) {
-                        if (entry.getValue() > 0) Database.changeBalance(entry.getKey(), entry.getValue());
+                        if (entry.getValue() > 0) Database.changeBalanceChecked(entry.getKey(), entry.getValue());
                     }
                     if (bai.lastTagMessageId != null) deleteMessage(chatId, bai.lastTagMessageId);
                     if (bai.messageId != null) deleteMessage(chatId, bai.messageId);
@@ -904,7 +904,7 @@ public class CasinoBot extends TelegramLongPollingBot {
     private synchronized boolean tryChangeBalance(long userId, long amount) {
         long current = Database.getBalance(userId);
         if (amount < 0 && current < -amount) return false;
-        return Database.changeBalance(userId, amount);
+        return Database.changeBalanceChecked(userId, amount);
     }
 
     private synchronized boolean tryDeductBalances(List<Long> userIds, long amount) {
@@ -922,9 +922,9 @@ public class CasinoBot extends TelegramLongPollingBot {
         for (Map.Entry<Long, Long> entry : required.entrySet()) {
             long userId = entry.getKey();
             long deduction = entry.getValue();
-            if (!Database.changeBalance(userId, -deduction)) {
+            if (!Database.changeBalanceChecked(userId, -deduction)) {
                 for (Map.Entry<Long, Long> prior : deducted) {
-                    if (!Database.changeBalance(prior.getKey(), prior.getValue())) {
+                    if (!Database.changeBalanceChecked(prior.getKey(), prior.getValue())) {
                         System.err.println("[BALANCE] Không hoàn tác được tiền cược: userId="
                                 + prior.getKey() + ", amount=" + prior.getValue());
                     }
@@ -1577,7 +1577,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             // Nếu có lỗi DB, dừng tại đây và ghi mã phiên để quản trị đối soát; không báo thắng giả.
             for (Map.Entry<Long, Long> entry : winnings.entrySet()) {
                 if (entry.getValue() > 0
-                        && !Database.changeBalance(entry.getKey(), entry.getValue())) {
+                        && !Database.changeBalanceChecked(entry.getKey(), entry.getValue())) {
                     System.err.println("[BAITO][PAYOUT_FAILED] session=" + game.sessionId
                             + ", userId=" + entry.getKey() + ", amount=" + entry.getValue()
                             + ", pot=" + game.totalPot);
