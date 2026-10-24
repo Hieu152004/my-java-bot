@@ -904,8 +904,7 @@ public class CasinoBot extends TelegramLongPollingBot {
     private synchronized boolean tryChangeBalance(long userId, long amount) {
         long current = Database.getBalance(userId);
         if (amount < 0 && current < -amount) return false;
-        Database.changeBalance(userId, amount);
-        return true;
+        return Database.changeBalance(userId, amount);
     }
 
     private synchronized boolean tryDeductBalances(List<Long> userIds, long amount) {
@@ -918,8 +917,21 @@ public class CasinoBot extends TelegramLongPollingBot {
         for (Map.Entry<Long, Long> entry : required.entrySet()) {
             if (Database.getBalance(entry.getKey()) < entry.getValue()) return false;
         }
+
+        List<Map.Entry<Long, Long>> deducted = new ArrayList<>();
         for (Map.Entry<Long, Long> entry : required.entrySet()) {
-            Database.changeBalance(entry.getKey(), -entry.getValue());
+            long userId = entry.getKey();
+            long deduction = entry.getValue();
+            if (!Database.changeBalance(userId, -deduction)) {
+                for (Map.Entry<Long, Long> prior : deducted) {
+                    if (!Database.changeBalance(prior.getKey(), prior.getValue())) {
+                        System.err.println("[BALANCE] Không hoàn tác được tiền cược: userId="
+                                + prior.getKey() + ", amount=" + prior.getValue());
+                    }
+                }
+                return false;
+            }
+            deducted.add(Map.entry(userId, deduction));
         }
         return true;
     }
@@ -1561,8 +1573,18 @@ public class CasinoBot extends TelegramLongPollingBot {
                 }
             }
 
+            // Chỉ công bố kết quả sau khi xác nhận mọi khoản trả thưởng đã ghi vào Supabase.
+            // Nếu có lỗi DB, dừng tại đây và ghi mã phiên để quản trị đối soát; không báo thắng giả.
             for (Map.Entry<Long, Long> entry : winnings.entrySet()) {
-                if (entry.getValue() > 0) Database.changeBalance(entry.getKey(), entry.getValue());
+                if (entry.getValue() > 0
+                        && !Database.changeBalance(entry.getKey(), entry.getValue())) {
+                    System.err.println("[BAITO][PAYOUT_FAILED] session=" + game.sessionId
+                            + ", userId=" + entry.getKey() + ", amount=" + entry.getValue()
+                            + ", pot=" + game.totalPot);
+                    sendMessage(chatId, "⚠️ Lỗi cơ sở dữ liệu khi trả thưởng ván "
+                            + game.sessionId + ". Tạm dừng thông báo kết quả; cần quản trị kiểm tra log và số dư.");
+                    return;
+                }
             }
 
             long absoluteWinnerId = activePlayers.isEmpty() ? game.playerOrder.get(0) : findBestHandWinners(game, activePlayers).get(0);
