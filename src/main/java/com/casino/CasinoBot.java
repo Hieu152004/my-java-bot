@@ -1679,6 +1679,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         Card c1 = sorted.get(0);
         Card c2 = sorted.get(1);
         Card c3 = sorted.get(2);
+        int strongestSuit = Math.max(c1.suitValue, Math.max(c2.suitValue, c3.suitValue));
 
         if (c1.rankValue == c2.rankValue && c2.rankValue == c3.rankValue) {
             return new HandScore(4, c1.rankValue, 0, "Sáp " + c1.rank);
@@ -1700,7 +1701,6 @@ public class CasinoBot extends TelegramLongPollingBot {
         boolean isAllFaceCards = c1.rankValue >= 11 && c1.rankValue <= 13 &&
                                  c2.rankValue >= 11 && c2.rankValue <= 13 &&
                                  c3.rankValue >= 11 && c3.rankValue <= 13;
-        int strongestSuit = Math.max(c1.suitValue, Math.max(c2.suitValue, c3.suitValue));
         if (isAllFaceCards) {
             return new HandScore(2, c3.rankValue, strongestSuit, "3 Tây");
         }
