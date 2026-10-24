@@ -207,6 +207,8 @@ public class CasinoBot extends TelegramLongPollingBot {
             if (this.type != o.type) {
                 return Integer.compare(this.type, o.type);
             }
+            // Với cùng loại bài, ưu tiên giá trị/hạng trước; nếu bằng nhau thì so chất:
+            // Cơ > Rô > Chuồn > Bích. Không dùng vị trí người chơi để tự chọn thắng.
             if (this.primaryValue != o.primaryValue) {
                 return Integer.compare(this.primaryValue, o.primaryValue);
             }
@@ -1167,17 +1169,33 @@ public class CasinoBot extends TelegramLongPollingBot {
             return;
         }
 
-        // Đọc đúng bộ bài cố định đã chia; thao tác xem bài không rút/chia lại.
-        List<Card> hand = game.cards.get(user.getId());
-        if (hand == null) {
-            answerAlert(queryId, "❌ Bạn không có bài trong ván này!");
-            return;
-        }
+        synchronized (game) {
+            long userId = user.getId();
+            // Chỉ hiện bài nếu người chơi thuộc đúng phiên hiện tại.
+            if (!game.players.containsKey(userId) || !game.playerOrder.contains(userId)) {
+                answerAlert(queryId, "❌ Bạn không tham gia ván này!");
+                return;
+            }
 
-        HandScore score = game.evaluatedHands.computeIfAbsent(user.getId(), id -> evaluateHand(hand));
-        String cardsStr = hand.get(0) + " " + hand.get(1) + " " + hand.get(2);
-        answerAlert(queryId, "🔖 Phiên: " + (game.sessionId == null ? "chưa có mã" : game.sessionId)
-                + "\n🃏 Bài của bạn: [ " + cardsStr + " ]\n📊 Loại bài: " + score.description);
+            // Chỉ đọc bài đã khóa khi chia; không bao giờ rút/chia lại ở nút XEM BÀI.
+            List<Card> hand = game.cards.get(userId);
+            if (hand == null || hand.size() != 3) {
+                System.err.println("[BAITO] Thiếu bài đã chia: chatId=" + chatId
+                        + ", userId=" + userId + ", session=" + game.sessionId
+                        + ", players=" + game.players.keySet() + ", cards=" + game.cards.keySet());
+                answerAlert(queryId, "⚠️ Dữ liệu bài của bạn đang bị thiếu trong ván này. Báo quản trị dùng /reset để xử lý ván lỗi.");
+                return;
+            }
+
+            HandScore score = game.evaluatedHands.get(userId);
+            if (score == null) {
+                score = evaluateHand(hand);
+                game.evaluatedHands.put(userId, score);
+            }
+            String cardsStr = hand.get(0) + " " + hand.get(1) + " " + hand.get(2);
+            answerAlert(queryId, "🔖 Phiên: " + (game.sessionId == null ? "chưa có mã" : game.sessionId)
+                    + "\n🃏 Bài của bạn: [ " + cardsStr + " ]\n📊 Loại bài: " + score.description);
+        }
     }
 
     private void handleBaiCaoAction(long chatId, User user, String action, long param, String queryId) {
