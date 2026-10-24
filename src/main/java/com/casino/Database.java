@@ -62,15 +62,32 @@ public class Database {
         return 0;
     }
 
+    /**
+     * Changes a user's balance and reports whether the database actually updated a row.
+     * Callers that move money must check the return value instead of assuming success.
+     */
     public static synchronized void changeBalance(long userId, long amount) {
+        changeBalanceChecked(userId, amount);
+    }
+
+    /** Returns true only when Supabase confirms exactly one user's balance was updated. */
+    public static synchronized boolean changeBalanceChecked(long userId, long amount) {
         try (Connection conn = DriverManager.getConnection(DB_URL);
              PreparedStatement pstmt = conn.prepareStatement(
                      "UPDATE users SET balance = balance + ? WHERE user_id = ?")) {
             pstmt.setLong(1, amount);
             pstmt.setLong(2, userId);
-            pstmt.executeUpdate();
+            int updated = pstmt.executeUpdate();
+            if (updated != 1) {
+                System.err.println("[BALANCE] Không cập nhật được số dư: userId=" + userId
+                        + ", amount=" + amount + ", rows=" + updated);
+                return false;
+            }
+            return true;
         } catch (SQLException e) {
-            e.printStackTrace();
+            System.err.println("[BALANCE] Lỗi cập nhật số dư: userId=" + userId
+                    + ", amount=" + amount + ", error=" + e.getMessage());
+            return false;
         }
     }
 
