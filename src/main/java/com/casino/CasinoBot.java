@@ -1694,14 +1694,15 @@ public class CasinoBot extends TelegramLongPollingBot {
         }
 
         if (isLieng) {
-            return new HandScore(3, liengHighValue, c3.suitValue, "Liêng");
+            return new HandScore(3, liengHighValue, strongestSuit, "Liêng");
         }
 
         boolean isAllFaceCards = c1.rankValue >= 11 && c1.rankValue <= 13 &&
                                  c2.rankValue >= 11 && c2.rankValue <= 13 &&
                                  c3.rankValue >= 11 && c3.rankValue <= 13;
+        int strongestSuit = Math.max(c1.suitValue, Math.max(c2.suitValue, c3.suitValue));
         if (isAllFaceCards) {
-            return new HandScore(2, c3.rankValue, c3.suitValue, "3 Tây");
+            return new HandScore(2, c3.rankValue, strongestSuit, "3 Tây");
         }
 
         int totalPoints = 0;
@@ -1712,7 +1713,9 @@ public class CasinoBot extends TelegramLongPollingBot {
             totalPoints += p;
         }
         int score = totalPoints % 10;
-        return new HandScore(1, score, c3.suitValue, score + " điểm");
+        // Khi cùng điểm, bỏ qua hạng lá cao nhất: chỉ xét chất cao nhất có trong 3 lá.
+        // Chất: Cơ (4) > Rô (3) > Chuồn (2) > Bích (1).
+        return new HandScore(1, score, strongestSuit, score + " điểm");
     }
 
     private void takeDealer(long chatId, User user, String queryId) {
