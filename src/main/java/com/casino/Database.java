@@ -66,7 +66,12 @@ public class Database {
      * Changes a user's balance and reports whether the database actually updated a row.
      * Callers that move money must check the return value instead of assuming success.
      */
-    public static synchronized boolean changeBalance(long userId, long amount) {
+    public static synchronized void changeBalance(long userId, long amount) {
+        changeBalanceChecked(userId, amount);
+    }
+
+    /** Returns true only when Supabase confirms exactly one user's balance was updated. */
+    public static synchronized boolean changeBalanceChecked(long userId, long amount) {
         try (Connection conn = DriverManager.getConnection(DB_URL);
              PreparedStatement pstmt = conn.prepareStatement(
                      "UPDATE users SET balance = balance + ? WHERE user_id = ?")) {
