@@ -995,33 +995,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             game.evaluatedHands.put(pId, evaluateHand(fixedHand));
         }
 
-        // Gửi bản đối chiếu riêng cho từng người ngay sau khi chia xong.
-        // Nội dung dùng chính fixedHand đã lưu, không rút hoặc tạo bài mới.
-        for (long pId : game.playerOrder) {
-            List<Card> dealtHand = game.cards.get(pId);
-            if (dealtHand != null) {
-                String playerName = game.players.getOrDefault(pId, "Người chơi");
-                String cardsText = dealtHand.get(0) + " " + dealtHand.get(1) + " " + dealtHand.get(2);
-                String privateText = "🧾 <b>BẢN ĐỐI CHIẾU CHIA BÀI BÀI TỐ</b>\n"
-                        + "🔖 Mã phiên: <code>" + game.sessionId + "</code>\n"
-                        + "👤 Người chơi: " + escapeHtml(playerName) + "\n"
-                        + "🃏 3 lá đã chia: <b>[ " + cardsText + " ]</b>\n"
-                        + "ℹ️ Đây là bản ghi để so sánh với nút XEM BÀI trong nhóm và kết quả cuối ván.";
-                SendMessage privateMsg = new SendMessage();
-                privateMsg.setChatId(String.valueOf(pId));
-                privateMsg.setText(privateText);
-                privateMsg.setParseMode("HTML");
-                telegramExecutor.execute(() -> {
-                    try {
-                        execute(privateMsg);
-                    } catch (TelegramApiException e) {
-                        System.err.println("[BAITO] Không gửi được bài riêng. session=" + game.sessionId
-                                + ", userId=" + pId + ", lỗi=" + e.getMessage()
-                                + " (người chơi cần mở chat riêng với bot và bấm Start trước).");
-                    }
-                });
-            }
-        }
+        // Không gửi bài riêng tự động; người chơi xem bài bằng nút XEM BÀI trong nhóm.
 
         sendBaiCaoPlayingMessage(chatId);
         } // synchronized (game): ván và bộ bài đã được khởi tạo nguyên tử
