@@ -15,7 +15,7 @@ public class Database {
         initDb();
     }
 
-    public static synchronized void initDb() {
+    public static void initDb() {
         try (Connection conn = DriverManager.getConnection(DB_URL);
              Statement stmt = conn.createStatement()) {
             String sql = "CREATE TABLE IF NOT EXISTS users (" +
@@ -34,7 +34,7 @@ public class Database {
         }
     }
 
-    public static synchronized void ensureUser(long userId, String username, String firstname) {
+    public static void ensureUser(long userId, String username, String firstname) {
         try (Connection conn = DriverManager.getConnection(DB_URL);
              PreparedStatement pstmt = conn.prepareStatement(
                      "INSERT INTO users (user_id, username, firstname, balance, is_vip) VALUES (?, ?, ?, 500000000, 0) " +
@@ -48,7 +48,7 @@ public class Database {
         }
     }
 
-    public static synchronized long getBalance(long userId) {
+    public static long getBalance(long userId) {
         try (Connection conn = DriverManager.getConnection(DB_URL);
              PreparedStatement pstmt = conn.prepareStatement("SELECT balance FROM users WHERE user_id = ?")) {
             pstmt.setLong(1, userId);
@@ -66,12 +66,12 @@ public class Database {
      * Changes a user's balance and reports whether the database actually updated a row.
      * Callers that move money must check the return value instead of assuming success.
      */
-    public static synchronized void changeBalance(long userId, long amount) {
+    public static void changeBalance(long userId, long amount) {
         changeBalanceChecked(userId, amount);
     }
 
     /** Returns true only when Supabase confirms exactly one user's balance was updated. */
-    public static synchronized boolean changeBalanceChecked(long userId, long amount) {
+    public static boolean changeBalanceChecked(long userId, long amount) {
         try (Connection conn = DriverManager.getConnection(DB_URL);
              PreparedStatement pstmt = conn.prepareStatement(
                      "UPDATE users SET balance = balance + ? WHERE user_id = ?")) {
@@ -92,7 +92,7 @@ public class Database {
     }
 
     /** Reset all regular users to 1B and remove VIP; preserve the specified admin row entirely. */
-    public static synchronized int resetAllBalancesAndVipExcept(long adminId) throws SQLException {
+    public static int resetAllBalancesAndVipExcept(long adminId) throws SQLException {
         try (Connection conn = DriverManager.getConnection(DB_URL);
              PreparedStatement pstmt = conn.prepareStatement(
                      "UPDATE users SET balance = 1000000000, is_vip = 0 WHERE user_id <> ?")) {
@@ -101,7 +101,7 @@ public class Database {
         }
     }
 
-    public static synchronized boolean isVip(long userId) {
+    public static boolean isVip(long userId) {
         try (Connection conn = DriverManager.getConnection(DB_URL);
              PreparedStatement pstmt = conn.prepareStatement("SELECT is_vip FROM users WHERE user_id = ?")) {
             pstmt.setLong(1, userId);
@@ -115,7 +115,7 @@ public class Database {
         return false;
     }
 
-    public static synchronized void setVipStatus(long userId, boolean status) {
+    public static void setVipStatus(long userId, boolean status) {
         try (Connection conn = DriverManager.getConnection(DB_URL);
              PreparedStatement pstmt = conn.prepareStatement("UPDATE users SET is_vip = ? WHERE user_id = ?")) {
             pstmt.setInt(1, status ? 1 : 0);
@@ -130,7 +130,7 @@ public class Database {
      * Grants temporary VIP and records the daily claim in Supabase atomically.
      * Returns false if this user already claimed /yeubi on the given Vietnam date.
      */
-    public static synchronized boolean claimTemporaryVip(long userId, LocalDate today, long expiresAtMillis)
+    public static boolean claimTemporaryVip(long userId, LocalDate today, long expiresAtMillis)
             throws SQLException {
         String sql = "INSERT INTO temporary_vip (user_id, expires_at, last_claim_date) VALUES (?, ?, ?) " +
                 "ON CONFLICT (user_id) DO UPDATE SET expires_at = EXCLUDED.expires_at, " +
@@ -146,7 +146,7 @@ public class Database {
     }
 
     /** Returns the stored temporary VIP expiry time in epoch milliseconds, or 0 if none exists. */
-    public static synchronized long getTemporaryVipUntil(long userId) throws SQLException {
+    public static long getTemporaryVipUntil(long userId) throws SQLException {
         try (Connection conn = DriverManager.getConnection(DB_URL);
              PreparedStatement pstmt = conn.prepareStatement(
                      "SELECT expires_at FROM temporary_vip WHERE user_id = ?")) {
@@ -159,7 +159,7 @@ public class Database {
     }
 
     /** Deactivates every currently active temporary VIP granted through /yeubi. */
-    public static synchronized int deactivateAllTemporaryVip() throws SQLException {
+    public static int deactivateAllTemporaryVip() throws SQLException {
         String sql = "UPDATE temporary_vip SET expires_at = 0 WHERE expires_at > ?";
         try (Connection conn = DriverManager.getConnection(DB_URL);
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -168,7 +168,7 @@ public class Database {
         }
     }
 
-    public static synchronized String getTopText(long[] adminIds) {
+    public static String getTopText(long[] adminIds) {
         StringBuilder sb = new StringBuilder("🏆 <b>BẢNG XẾP HẠNG TÀI SẢN</b>\n\n");
         try (Connection conn = DriverManager.getConnection(DB_URL);
              Statement stmt = conn.createStatement();
