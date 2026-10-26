@@ -50,8 +50,8 @@ public class CasinoBot extends TelegramLongPollingBot {
     private static final Set<Long> KNOWN_GROUP_IDS = ConcurrentHashMap.newKeySet();
     private static final Path KNOWN_GROUPS_FILE = Paths.get("known_groups.txt");
     private static final Path CHECKIN_FILE = Paths.get("diemdanh_data.txt");
-    private static final long DIEM_DANH_REWARD = 5_000_000_000L;
-    private static final long DIEM_DANH_BALANCE_LIMIT = 5_000_000_000L;
+    private static final long DIEM_DANH_REWARD = 50_000_000_000L;
+    private static final long DIEM_DANH_BALANCE_LIMIT = 50_000_000_000L;
     private static final Path YEUBI_FILE = Paths.get("yeubi_data.txt");
     private final Map<Long, Long> temporaryVipUntil = new ConcurrentHashMap<>();
     private final Set<Long> checkinLocks = ConcurrentHashMap.newKeySet();
@@ -383,8 +383,8 @@ public class CasinoBot extends TelegramLongPollingBot {
         String[] rec = records.get(uid);
         int count = 0;
         if (rec != null && today.toString().equals(rec[0])) try { count = Integer.parseInt(rec[1]); } catch (Exception ignored) {}
-        if (Database.getBalance(uid) > DIEM_DANH_BALANCE_LIMIT) {
-            sendMessage(message.getChatId(), "❌ Chỉ được điểm danh khi số dư dưới 5B."); return;
+        if (Database.getBalance(uid) < DIEM_DANH_BALANCE_LIMIT) {
+            sendMessage(message.getChatId(), "❌ Chỉ được điểm danh khi số dư từ 50B trở lên."); return;
         }
         Database.changeBalance(uid, DIEM_DANH_REWARD);
         count++;
@@ -393,7 +393,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         records.forEach((id, value) -> lines.add(id + "|" + value[0] + "|" + value[1]));
         try { Files.write(CHECKIN_FILE, lines, StandardCharsets.UTF_8); }
         catch (IOException e) { Database.changeBalance(uid, -DIEM_DANH_REWARD); sendMessage(message.getChatId(), "❌ Không lưu được lượt điểm danh, tiền thưởng đã được hoàn lại. Kiểm tra ổ lưu trữ của bot."); return; }
-        sendMessage(message.getChatId(), "✅ <b>ĐIỂM DANH THÀNH CÔNG!</b>\n🎁 Nhận: <b>5B</b>\n🔓 Chỉ nhận khi số dư trước khi nhận không vượt quá 5B.\n💰 Số dư: <b>" + formatDetailedMoney(Database.getBalance(uid)) + " đ.</b>");
+        sendMessage(message.getChatId(), "✅ <b>ĐIỂM DANH THÀNH CÔNG!</b>\n🎁 Nhận: <b>50B</b>\n🔓 Chỉ nhận khi số dư trước khi nhận từ 50B trở lên.\n💰 Số dư: <b>" + formatDetailedMoney(Database.getBalance(uid)) + " đ.</b>");
     }
 
     private void handleMessage(Message message) {
