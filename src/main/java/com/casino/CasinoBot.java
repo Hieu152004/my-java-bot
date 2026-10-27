@@ -1640,8 +1640,20 @@ public class CasinoBot extends TelegramLongPollingBot {
             for (long pId : game.playerOrder) {
                 List<Card> h = game.cards.get(pId);
                 if (h == null) continue;
-                HandScore sc = game.evaluatedHands.computeIfAbsent(pId, id -> evaluateHand(h));
-                String statusNote = game.folded.contains(pId) ? " (Đã úp bài)" : " — <b>" + sc.description + "</b>";
+                // Chỉ hiển thị điểm ở bảng kết quả; loại bài vẫn được giữ nội bộ để so thắng thua.
+                game.evaluatedHands.computeIfAbsent(pId, id -> evaluateHand(h));
+                int totalPoints = 0;
+                for (Card card : h) {
+                    int value;
+                    switch (card.rank) {
+                        case "A": value = 1; break;
+                        case "J": case "Q": case "K": value = 10; break;
+                        default: value = Integer.parseInt(card.rank); break;
+                    }
+                    totalPoints += value;
+                }
+                int points = totalPoints % 10;
+                String statusNote = game.folded.contains(pId) ? " (Đã úp bài)" : " — <b>" + points + " điểm</b>";
                 winMsg.append("\n- ").append(getMention(pId, game.players.get(pId)))
                       .append(": [ ").append(h.get(0)).append(" ").append(h.get(1)).append(" ").append(h.get(2)).append(" ]")
                       .append(statusNote);
