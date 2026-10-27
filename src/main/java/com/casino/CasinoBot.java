@@ -1257,8 +1257,21 @@ public class CasinoBot extends TelegramLongPollingBot {
                 game.evaluatedHands.put(userId, score);
             }
             String cardsStr = hand.get(0) + " " + hand.get(1) + " " + hand.get(2);
+            int totalPoints = 0;
+            StringBuilder pointCalculation = new StringBuilder();
+            for (Card card : hand) {
+                int point = card.rankValue;
+                if (point >= 10 && point <= 13) point = 10;
+                else if (point == 14) point = 1;
+                totalPoints += point;
+                if (pointCalculation.length() > 0) pointCalculation.append(" + ");
+                pointCalculation.append(point);
+            }
+            int points = totalPoints % 10;
             answerAlert(queryId, "🔖 Phiên: " + (game.sessionId == null ? "chưa có mã" : game.sessionId)
-                    + "\n🃏 Bài của bạn: [ " + cardsStr + " ]\n📊 Loại bài: " + score.description);
+                    + "\n🃏 Bài của bạn: [ " + cardsStr + " ]"
+                    + "\n📊 Điểm tính: " + points + " điểm (" + pointCalculation + " = " + totalPoints + ")"
+                    + "\nℹ️ Loại bài vẫn được dùng riêng để phân định thắng thua.");
         }
     }
 
