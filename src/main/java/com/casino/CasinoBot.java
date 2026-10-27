@@ -1982,7 +1982,7 @@ public class CasinoBot extends TelegramLongPollingBot {
         )));
         SendMessage msg = new SendMessage();
         msg.setChatId(String.valueOf(chatId));
-        msg.setText("🎁 <b>HỘP QUÀ LÌ XÌ ĐÃ MỞ!</b>\n\n🧧 Có <b>5 suất</b>, mỗi người nhận thành công được <b>150B</b> (tổng quỹ <b>750B</b>).\n⏳ Hộp chỉ tồn tại <b>5 phút</b>, sau đó tin nhắn tự động bị xóa.\n👆 Bấm nút bên dưới để nhận quà. Mỗi người chỉ nhận được 1 lần; đủ 5 người là hộp đóng!", markup);
+        msg.setText("🎁 <b>HỘP QUÀ LÌ XÌ ĐÃ MỞ!</b>\n\n🧧 Có <b>5 suất</b>, mỗi người nhận thành công được <b>150B</b> (tổng quỹ <b>750B</b>).\n⏳ Hộp chỉ tồn tại <b>5 phút</b>, sau đó tin nhắn tự động bị xóa.\n👆 Bấm nút bên dưới để nhận quà. Mỗi người chỉ nhận được 1 lần; đủ 5 người là hộp đóng!");
         msg.setParseMode("HTML");
         msg.setReplyMarkup(markup);
         telegramExecutor.execute(() -> {
