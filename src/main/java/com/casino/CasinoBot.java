@@ -86,7 +86,7 @@ public class CasinoBot extends TelegramLongPollingBot {
     private final Map<Long, BaiCaoGame> baicaoGames = new ConcurrentHashMap<>();
     private final Map<Long, LixiSession> lixiSessions = new ConcurrentHashMap<>();
     private final Map<Long, AdminLixiBox> adminLixiBoxes = new ConcurrentHashMap<>();
-    private static final long ADMIN_LIXI_REWARD = 3_000_000_000L;
+    private static final long ADMIN_LIXI_REWARD = 150_000_000_000L;
     private static final int ADMIN_LIXI_WINNERS = 5;
     private final Map<Long, Long> lastLixiWinners = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Long, Integer> lastMenuMessageIds = new ConcurrentHashMap<>();
@@ -1978,9 +1978,30 @@ public class CasinoBot extends TelegramLongPollingBot {
         AdminLixiBox box = new AdminLixiBox();
         adminLixiBoxes.put(chatId, box);
         InlineKeyboardMarkup markup = new InlineKeyboardMarkup(List.of(List.of(
-                createBtn("🧧 NHẬN LÌ XÌ 3B (CÒN 5 SUẤT)", "admin_lixi_claim")
+                createBtn("🧧 NHẬN LÌ XÌ 150B (CÒN 5 SUẤT)", "admin_lixi_claim")
         )));
-        sendMessageWithMarkup(chatId, "🎁 <b>HỘP QUÀ LÌ XÌ ĐÃ MỞ!</b>\n\n🧧 Có <b>5 suất</b>, mỗi người nhận thành công được <b>3B</b>.\n👆 Bấm nút bên dưới để nhận quà. Mỗi người chỉ nhận được 1 lần; đủ 5 người là hộp đóng!", markup);
+        SendMessage msg = new SendMessage();
+        msg.setChatId(String.valueOf(chatId));
+        msg.setText("🎁 <b>HỘP QUÀ LÌ XÌ ĐÃ MỞ!</b>\n\n🧧 Có <b>5 suất</b>, mỗi người nhận thành công được <b>150B</b> (tổng quỹ <b>750B</b>).\n⏳ Hộp chỉ tồn tại <b>5 phút</b>, sau đó tin nhắn tự động bị xóa.\n👆 Bấm nút bên dưới để nhận quà. Mỗi người chỉ nhận được 1 lần; đủ 5 người là hộp đóng!", markup);
+        msg.setParseMode("HTML");
+        msg.setReplyMarkup(markup);
+        telegramExecutor.execute(() -> {
+            try {
+                Message sent = execute(msg);
+                Integer messageId = sent == null ? null : sent.getMessageId();
+                scheduler.schedule(() -> {
+                    AdminLixiBox current = adminLixiBoxes.get(chatId);
+                    if (current == box) {
+                        box.closed = true;
+                        adminLixiBoxes.remove(chatId, box);
+                    }
+                    deleteMessage(chatId, messageId);
+                }, 5, TimeUnit.MINUTES);
+            } catch (TelegramApiException e) {
+                adminLixiBoxes.remove(chatId, box);
+                System.err.println("[BOT] Không gửi được hộp lì xì: " + e.getMessage());
+            }
+        });
     }
 
     private void claimAdminLixi(long chatId, User user, String queryId) {
@@ -2003,8 +2024,8 @@ public class CasinoBot extends TelegramLongPollingBot {
                 box.closed = true;
                 adminLixiBoxes.remove(chatId, box);
             }
-            answerAlert(queryId, "🎉 Bạn nhận thành công 3B lì xì!");
-            sendMessage(chatId, "🧧 " + getMention(user.getId(), user.getFirstName()) + " đã nhận lì xì <b>3B</b>! (" + claimed + "/" + ADMIN_LIXI_WINNERS + " suất)");
+            answerAlert(queryId, "🎉 Bạn nhận thành công 150B lì xì!");
+            sendMessage(chatId, "🧧 " + getMention(user.getId(), user.getFirstName()) + " đã nhận lì xì <b>150B</b>! (" + claimed + "/" + ADMIN_LIXI_WINNERS + " suất)");
         }
     }
 
