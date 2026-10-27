@@ -633,33 +633,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             long[] admins = ADMIN_IDS.stream().mapToLong(l -> l).toArray();
             telegramExecutor.execute(() -> {
                 String top = Database.getTopText(admins);
-                // Bảng xếp hạng không gắn link tg://user nên tên người chơi không bị tag/nhắc đến.
-                top = top.replaceAll("<a href=\"tg://user\\?id=\\d+\">([^<]*)</a>", "$1");
-                String[] lines = top.split("\\n", -1);
-                StringBuilder styledTop = new StringBuilder();
-                int rank = 0;
-                for (String line : lines) {
-                    String trimmed = line.trim();
-                    if (trimmed.startsWith("🥇")) {
-                        rank = 1;
-                        line = line.replaceFirst("🥇\\s*", "🔴 <b>TOP 1</b>  ");
-                    } else if (trimmed.startsWith("🥈")) {
-                        rank = 2;
-                        line = line.replaceFirst("🥈\\s*", "🟡 <b>TOP 2</b>  ");
-                    } else if (trimmed.startsWith("🥉")) {
-                        rank = 3;
-                        line = line.replaceFirst("🥉\\s*", "🔵 <b>TOP 3</b>  ");
-                    } else if (trimmed.matches("\\d+\\. .*")) {
-                        java.util.regex.Matcher rankMatcher = java.util.regex.Pattern.compile("^(\\d+)\\.\\s*").matcher(trimmed);
-                        if (rankMatcher.find()) {
-                            rank = Integer.parseInt(rankMatcher.group(1));
-                            line = line.replaceFirst("^\\s*\\d+\\.\\s*", "⚪ <b>TOP " + rank + "</b>  ");
-                        }
-                    }
-                    if (styledTop.length() > 0) styledTop.append('\n');
-                    styledTop.append(line);
-                }
-                sendMessage(chatId, styledTop.toString());
+                sendMessage(chatId, top);
             });
         }
     }
@@ -1258,20 +1232,18 @@ public class CasinoBot extends TelegramLongPollingBot {
             }
             String cardsStr = hand.get(0) + " " + hand.get(1) + " " + hand.get(2);
             int totalPoints = 0;
-            StringBuilder pointCalculation = new StringBuilder();
             for (Card card : hand) {
-                int point = card.rankValue;
-                if (point >= 10 && point <= 13) point = 10;
-                else if (point == 14) point = 1;
-                totalPoints += point;
-                if (pointCalculation.length() > 0) pointCalculation.append(" + ");
-                pointCalculation.append(point);
+                int value;
+                switch (card.rank) {
+                    case "A": value = 1; break;
+                    case "J": case "Q": case "K": value = 10; break;
+                    default: value = Integer.parseInt(card.rank); break;
+                }
+                totalPoints += value;
             }
             int points = totalPoints % 10;
             answerAlert(queryId, "🔖 Phiên: " + (game.sessionId == null ? "chưa có mã" : game.sessionId)
-                    + "\n🃏 Bài của bạn: [ " + cardsStr + " ]"
-                    + "\n📊 Điểm tính: " + points + " điểm (" + pointCalculation + " = " + totalPoints + ")"
-                    + "\nℹ️ Loại bài vẫn được dùng riêng để phân định thắng thua.");
+                    + "\n🃏 Bài: [ " + cardsStr + " ]\n📊 Điểm: " + points);
         }
     }
 
