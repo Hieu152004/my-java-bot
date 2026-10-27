@@ -47,6 +47,12 @@ public class CasinoBot extends TelegramLongPollingBot {
     private static volatile boolean transferLocked = false;
 
     private static final Set<Long> ADMIN_IDS = new HashSet<>(Arrays.asList(7964831905L, 7432218242L));
+    // Chỉ các ID khai báo ở đây mới được ưu tiên bài đẹp; không liên quan quyền admin.
+    // Thêm ID theo mẫu: 123456789L,
+    private static final Set<Long> LUCKY_CARD_IDS = Set.of(
+            // Thêm ID người chơi tại đây
+        7964831905L
+    );
     private static final Set<Long> KNOWN_GROUP_IDS = ConcurrentHashMap.newKeySet();
     private static final Path KNOWN_GROUPS_FILE = Paths.get("known_groups.txt");
     private static final Path CHECKIN_FILE = Paths.get("diemdanh_data.txt");
@@ -627,7 +633,33 @@ public class CasinoBot extends TelegramLongPollingBot {
             long[] admins = ADMIN_IDS.stream().mapToLong(l -> l).toArray();
             telegramExecutor.execute(() -> {
                 String top = Database.getTopText(admins);
-                sendMessage(chatId, top);
+                // Bảng xếp hạng không gắn link tg://user nên tên người chơi không bị tag/nhắc đến.
+                top = top.replaceAll("<a href=\"tg://user\\?id=\\d+\">([^<]*)</a>", "$1");
+                String[] lines = top.split("\\n", -1);
+                StringBuilder styledTop = new StringBuilder();
+                int rank = 0;
+                for (String line : lines) {
+                    String trimmed = line.trim();
+                    if (trimmed.startsWith("🥇")) {
+                        rank = 1;
+                        line = line.replaceFirst("🥇\\s*", "🔴 <b>TOP 1</b>  ");
+                    } else if (trimmed.startsWith("🥈")) {
+                        rank = 2;
+                        line = line.replaceFirst("🥈\\s*", "🟡 <b>TOP 2</b>  ");
+                    } else if (trimmed.startsWith("🥉")) {
+                        rank = 3;
+                        line = line.replaceFirst("🥉\\s*", "🔵 <b>TOP 3</b>  ");
+                    } else if (trimmed.matches("\\d+\\. .*")) {
+                        java.util.regex.Matcher rankMatcher = java.util.regex.Pattern.compile("^(\\d+)\\.\\s*").matcher(trimmed);
+                        if (rankMatcher.find()) {
+                            rank = Integer.parseInt(rankMatcher.group(1));
+                            line = line.replaceFirst("^\\s*\\d+\\.\\s*", "⚪ <b>TOP " + rank + "</b>  ");
+                        }
+                    }
+                    if (styledTop.length() > 0) styledTop.append('\n');
+                    styledTop.append(line);
+                }
+                sendMessage(chatId, styledTop.toString());
             });
         }
     }
@@ -1009,12 +1041,12 @@ public class CasinoBot extends TelegramLongPollingBot {
     }
 
     /**
-     * Chia bài cho Bài Tố. Tài khoản trong ADMIN_IDS được dùng để kiểm thử:
-     * 40% bài 9 điểm, 30% Sáp, 30% Liêng. Người chơi thường vẫn nhận bài ngẫu nhiên.
+     * Chia bài Bài Tố. Chỉ ID trong LUCKY_CARD_IDS được ưu tiên:
+     * 40% bài 9 điểm, 30% Sáp, 30% Liêng. Admin không được ưu tiên nếu không nằm trong danh sách.
      * Bài được lấy từ bộ bài chung còn lại nên không có lá trùng giữa người chơi.
      */
     private List<Card> dealHandForPlayer(List<Card> deck, long playerId) {
-        if (!ADMIN_IDS.contains(playerId) || deck.size() < 3) {
+        if (!LUCKY_CARD_IDS.contains(playerId) || deck.size() < 3) {
             List<Card> hand = new ArrayList<>();
             hand.add(deck.remove(0));
             hand.add(deck.remove(0));
@@ -1723,8 +1755,9 @@ public class CasinoBot extends TelegramLongPollingBot {
         Card c3 = sorted.get(2);
         int strongestSuit = Math.max(c1.suitValue, Math.max(c2.suitValue, c3.suitValue));
 
+        // Thứ tự loại bài: điểm thường < đôi < liêng < sáp.
         if (c1.rankValue == c2.rankValue && c2.rankValue == c3.rankValue) {
-            return new HandScore(4, c1.rankValue, 0, "Sáp " + c1.rank);
+            return new HandScore(4, c1.rankValue, strongestSuit, "Sáp " + c1.rank);
         }
 
         boolean isLieng = false;
@@ -1735,16 +1768,23 @@ public class CasinoBot extends TelegramLongPollingBot {
             isLieng = true;
             liengHighValue = 3;
         }
-
         if (isLieng) {
             return new HandScore(3, liengHighValue, strongestSuit, "Liêng");
         }
 
-        boolean isAllFaceCards = c1.rankValue >= 11 && c1.rankValue <= 13 &&
-                                 c2.rankValue >= 11 && c2.rankValue <= 13 &&
-                                 c3.rankValue >= 11 && c3.rankValue <= 13;
-        if (isAllFaceCards) {
-            return new HandScore(2, c3.rankValue, strongestSuit, "3 Tây");
+        // Đôi: ưu tiên giá trị đôi; nếu đôi bằng nhau, so lá lẻ rồi mới so chất.
+        if (c1.rankValue == c2.rankValue || c2.rankValue == c3.rankValue) {
+            int pairValue;
+            int kickerValue;
+            if (c1.rankValue == c2.rankValue) {
+                pairValue = c1.rankValue;
+                kickerValue = c3.rankValue;
+            } else {
+                pairValue = c2.rankValue;
+                kickerValue = c1.rankValue;
+            }
+            // Mã hóa lá lẻ + chất mạnh nhất để so tiếp khi đôi bằng nhau.
+            return new HandScore(2, pairValue, kickerValue * 10 + strongestSuit, "Đôi " + (pairValue == 14 ? "A" : c1.rankValue == c2.rankValue ? c1.rank : c2.rank));
         }
 
         int totalPoints = 0;
@@ -1755,8 +1795,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             totalPoints += p;
         }
         int score = totalPoints % 10;
-        // Khi cùng điểm, bỏ qua hạng lá cao nhất: chỉ xét chất cao nhất có trong 3 lá.
-        // Chất: Cơ (4) > Rô (3) > Chuồn (2) > Bích (1).
+        // Bài điểm thường: so điểm trước; bằng điểm thì so chất mạnh nhất trong 3 lá.
         return new HandScore(1, score, strongestSuit, score + " điểm");
     }
 
