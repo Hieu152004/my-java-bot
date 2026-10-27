@@ -1242,8 +1242,12 @@ public class CasinoBot extends TelegramLongPollingBot {
                 totalPoints += value;
             }
             int points = totalPoints % 10;
+            boolean threeFaceCards = hand.stream().allMatch(c -> c.rankValue >= 11 && c.rankValue <= 13);
+            String displayResult = score.type == 4 ? "Sáp"
+                    : score.type == 3 ? "Liêng"
+                    : threeFaceCards ? "3 Tây" : points + " điểm";
             answerAlert(queryId, "🔖 Phiên: " + (game.sessionId == null ? "chưa có mã" : game.sessionId)
-                    + "\n🃏 Bài: [ " + cardsStr + " ]\n📊 Điểm: " + points);
+                    + "\n🃏 Bài: [ " + cardsStr + " ]\n📊 Điểm: " + displayResult);
         }
     }
 
@@ -1653,7 +1657,13 @@ public class CasinoBot extends TelegramLongPollingBot {
                     totalPoints += value;
                 }
                 int points = totalPoints % 10;
-                String statusNote = game.folded.contains(pId) ? " (Đã úp bài)" : " — <b>" + points + " điểm</b>";
+                HandScore shownScore = game.evaluatedHands.get(pId);
+                boolean threeFaceCards = h.stream().allMatch(c -> c.rankValue >= 11 && c.rankValue <= 13);
+                String displayResult = shownScore != null && shownScore.type == 4 ? "Sáp"
+                        : shownScore != null && shownScore.type == 3 ? "Liêng"
+                        : threeFaceCards ? "3 Tây" : points + " điểm";
+                String statusNote = game.folded.contains(pId) ? " (Đã úp bài)"
+                        : " — <b>" + displayResult + "</b>";
                 winMsg.append("\n- ").append(getMention(pId, game.players.get(pId)))
                       .append(": [ ").append(h.get(0)).append(" ").append(h.get(1)).append(" ").append(h.get(2)).append(" ]")
                       .append(statusNote);
