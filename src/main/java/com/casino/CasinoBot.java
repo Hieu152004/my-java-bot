@@ -383,6 +383,11 @@ public class CasinoBot extends TelegramLongPollingBot {
         String[] rec = records.get(uid);
         int count = 0;
         if (rec != null && today.toString().equals(rec[0])) try { count = Integer.parseInt(rec[1]); } catch (Exception ignored) {}
+        // Giống /ckd: không cho điểm danh khi người chơi đang tham gia ván cược.
+        if (isUserInAnyActiveGame(uid)) {
+            sendMessage(message.getChatId(), "❌ Bạn đang tham gia ván chơi/cược. Hãy chờ ván kết thúc rồi mới dùng /diemdanh.");
+            return;
+        }
         if (Database.getBalance(uid) > DIEM_DANH_BALANCE_LIMIT) {
             sendMessage(message.getChatId(), "❌ Chỉ được điểm danh khi số dư từ 50B trở xuống."); return;
         }
