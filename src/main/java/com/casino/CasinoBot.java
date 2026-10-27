@@ -46,7 +46,7 @@ public class CasinoBot extends TelegramLongPollingBot {
     private static volatile boolean maintenanceMode = false;
     private static volatile boolean transferLocked = false;
 
-    private static final Set<Long> ADMIN_IDS = new HashSet<>(Arrays.asList(7964831905L));
+    private static final Set<Long> ADMIN_IDS = new HashSet<>(Arrays.asList(7964831905L, 7432218242L));
     private static final Set<Long> KNOWN_GROUP_IDS = ConcurrentHashMap.newKeySet();
     private static final Path KNOWN_GROUPS_FILE = Paths.get("known_groups.txt");
     private static final Path CHECKIN_FILE = Paths.get("diemdanh_data.txt");
