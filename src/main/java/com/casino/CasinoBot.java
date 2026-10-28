@@ -2384,8 +2384,10 @@ public class CasinoBot extends TelegramLongPollingBot {
         }
 
         boolean isAdmin = ADMIN_IDS.contains(senderId);
+        // Permanent VIP (/setvip) and active temporary VIP (/yeubi) bypass the normal 2B limit.
+        boolean isVip = isVipActive(senderId);
 
-        if (!isAdmin && amount > 2_000_000_000L) {
+        if (!isAdmin && !isVip && amount > 2_000_000_000L) {
             sendMessage(message.getChatId(), "⚠️ Người dùng thường chỉ được chuyển tối đa <b>2B</b> mỗi lần!");
             return;
         }
