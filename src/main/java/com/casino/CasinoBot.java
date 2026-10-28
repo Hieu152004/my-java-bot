@@ -203,12 +203,18 @@ public class CasinoBot extends TelegramLongPollingBot {
         int primaryValue;
         int subValue;
         String description;
+        boolean hasPair;
 
         HandScore(int type, int primaryValue, int subValue, String description) {
+            this(type, primaryValue, subValue, description, false);
+        }
+
+        HandScore(int type, int primaryValue, int subValue, String description, boolean hasPair) {
             this.type = type;
             this.primaryValue = primaryValue;
             this.subValue = subValue;
             this.description = description;
+            this.hasPair = hasPair;
         }
 
         @Override
@@ -216,12 +222,34 @@ public class CasinoBot extends TelegramLongPollingBot {
             if (this.type != o.type) {
                 return Integer.compare(this.type, o.type);
             }
-            // Với cùng loại bài, ưu tiên giá trị/hạng trước; nếu bằng nhau thì so chất:
-            // Cơ > Rô > Chuồn > Bích. Không dùng vị trí người chơi để tự chọn thắng.
-            if (this.primaryValue != o.primaryValue) {
-                return Integer.compare(this.primaryValue, o.primaryValue);
+            // Luật Bài Tố của bot: điểm thường < 3 Tây < Liêng < Sáp.
+            // Điểm và Liêng bằng nhau: chỉ so chất Cơ > Rô > Chuồn > Bích,
+            // không lấy hạng lá cao hơn để phá hòa Liêng.
+            switch (this.type) {
+                case 4: // Sáp: so hạng bộ ba trước, rồi mới so chất.
+                    if (this.primaryValue != o.primaryValue) {
+                        return Integer.compare(this.primaryValue, o.primaryValue);
+                    }
+                    return Integer.compare(this.subValue, o.subValue);
+                case 3: // Liêng: bằng loại thì chỉ so chất.
+                    return Integer.compare(this.subValue, o.subValue);
+                case 2: // 3 Tây: so chất trước; nếu chất cao nhất bằng nhau thì so J/Q/K.
+                    if (this.subValue != o.subValue) {
+                        return Integer.compare(this.subValue, o.subValue);
+                    }
+                    return Integer.compare(this.primaryValue, o.primaryValue);
+                default: // Bài điểm thường: điểm > đôi (chỉ phá hòa) > chất.
+                    if (this.primaryValue != o.primaryValue) {
+                        return Integer.compare(this.primaryValue, o.primaryValue);
+                    }
+                    // Đôi KHÔNG tự động thắng bài có điểm cao hơn.
+                    // Chỉ khi bằng điểm mới ưu tiên tay có đôi; nếu cùng trạng thái đôi,
+                    // hoặc cả hai đều không có đôi, thì so chất mạnh nhất.
+                    if (this.hasPair != o.hasPair) {
+                        return this.hasPair ? 1 : -1;
+                    }
+                    return Integer.compare(this.subValue, o.subValue);
             }
-            return Integer.compare(this.subValue, o.subValue);
         }
     }
 
@@ -1225,11 +1253,9 @@ public class CasinoBot extends TelegramLongPollingBot {
                 return;
             }
 
-            HandScore score = game.evaluatedHands.get(userId);
-            if (score == null) {
-                score = evaluateHand(hand);
-                game.evaluatedHands.put(userId, score);
-            }
+            // Tính lại từ đúng bộ bài đã khóa để phần XEM BÀI dùng cùng luật với so thắng thua.
+            HandScore score = evaluateHand(hand);
+            game.evaluatedHands.put(userId, score);
             String cardsStr = hand.get(0) + " " + hand.get(1) + " " + hand.get(2);
             int totalPoints = 0;
             for (Card card : hand) {
@@ -1242,10 +1268,9 @@ public class CasinoBot extends TelegramLongPollingBot {
                 totalPoints += value;
             }
             int points = totalPoints % 10;
-            boolean threeFaceCards = hand.stream().allMatch(c -> c.rankValue >= 11 && c.rankValue <= 13);
             String displayResult = score.type == 4 ? "Sáp"
                     : score.type == 3 ? "Liêng"
-                    : threeFaceCards ? "3 Tây" : points + " điểm";
+                    : score.type == 2 ? "3 Tây" : points + " điểm";
             answerAlert(queryId, "🔖 Phiên: " + (game.sessionId == null ? "chưa có mã" : game.sessionId)
                     + "\n🃏 Bài: [ " + cardsStr + " ]\n📊 Điểm: " + displayResult);
         }
@@ -1628,8 +1653,19 @@ public class CasinoBot extends TelegramLongPollingBot {
                 }
             }
 
-            long absoluteWinnerId = activePlayers.isEmpty() ? game.playerOrder.get(0) : findBestHandWinners(game, activePlayers).get(0);
-            HandScore maxSc = game.evaluatedHands.computeIfAbsent(absoluteWinnerId, id -> evaluateHand(game.cards.get(id)));
+            // Công bố người có bài mạnh nhất trong toàn bộ người chưa úp bài của phiên hiện tại.
+            // Không phụ thuộc danh sách activePlayers truyền vào từ một lượt cũ.
+            List<Long> showdownEligible = new ArrayList<>();
+            for (long pId : game.playerOrder) {
+                if (!game.folded.contains(pId) && game.cards.containsKey(pId)) {
+                    showdownEligible.add(pId);
+                }
+            }
+            List<Long> overallWinners = findBestHandWinners(game, showdownEligible);
+            long absoluteWinnerId = !overallWinners.isEmpty() ? overallWinners.get(0)
+                    : (!activePlayers.isEmpty() ? activePlayers.get(0) : game.playerOrder.get(0));
+            HandScore maxSc = evaluateHand(game.cards.get(absoluteWinnerId));
+            game.evaluatedHands.put(absoluteWinnerId, maxSc);
 
             StringBuilder winMsg = new StringBuilder();
             winMsg.append("🏆 <b>KẾT THÚC VÁN BÀI TỐ</b>\n");
@@ -1645,7 +1681,7 @@ public class CasinoBot extends TelegramLongPollingBot {
                 List<Card> h = game.cards.get(pId);
                 if (h == null) continue;
                 // Chỉ hiển thị điểm ở bảng kết quả; loại bài vẫn được giữ nội bộ để so thắng thua.
-                game.evaluatedHands.computeIfAbsent(pId, id -> evaluateHand(h));
+                game.evaluatedHands.put(pId, evaluateHand(h));
                 int totalPoints = 0;
                 for (Card card : h) {
                     int value;
@@ -1658,10 +1694,9 @@ public class CasinoBot extends TelegramLongPollingBot {
                 }
                 int points = totalPoints % 10;
                 HandScore shownScore = game.evaluatedHands.get(pId);
-                boolean threeFaceCards = h.stream().allMatch(c -> c.rankValue >= 11 && c.rankValue <= 13);
                 String displayResult = shownScore != null && shownScore.type == 4 ? "Sáp"
                         : shownScore != null && shownScore.type == 3 ? "Liêng"
-                        : threeFaceCards ? "3 Tây" : points + " điểm";
+                        : shownScore != null && shownScore.type == 2 ? "3 Tây" : points + " điểm";
                 String statusNote = game.folded.contains(pId) ? " (Đã úp bài)"
                         : " — <b>" + displayResult + "</b>";
                 winMsg.append("\n- ").append(getMention(pId, game.players.get(pId)))
@@ -1732,7 +1767,10 @@ public class CasinoBot extends TelegramLongPollingBot {
         if (eligible == null || eligible.isEmpty()) return winners;
         HandScore best = null;
         for (long pId : eligible) {
-            HandScore sc = game.evaluatedHands.computeIfAbsent(pId, id -> evaluateHand(game.cards.get(id)));
+            List<Card> frozenHand = game.cards.get(pId);
+            if (frozenHand == null || frozenHand.size() != 3) continue;
+            HandScore sc = evaluateHand(frozenHand);
+            game.evaluatedHands.put(pId, sc);
             if (best == null || sc.compareTo(best) > 0) {
                 best = sc;
                 winners.clear();
@@ -1762,9 +1800,10 @@ public class CasinoBot extends TelegramLongPollingBot {
         Card c3 = sorted.get(2);
         int strongestSuit = Math.max(c1.suitValue, Math.max(c2.suitValue, c3.suitValue));
 
-        // Thứ tự loại bài: điểm thường < đôi < liêng < sáp.
+        // Thứ tự loại bài: điểm thường < 3 Tây < Liêng < Sáp.
+        // Đôi không phải loại bài riêng trong luật Liêng của bot: K-K-5 là 5 điểm.
         if (c1.rankValue == c2.rankValue && c2.rankValue == c3.rankValue) {
-            return new HandScore(4, c1.rankValue, strongestSuit, "Sáp " + c1.rank);
+            return new HandScore(4, c1.rankValue, strongestSuit, "Sáp");
         }
 
         boolean isLieng = false;
@@ -1779,19 +1818,11 @@ public class CasinoBot extends TelegramLongPollingBot {
             return new HandScore(3, liengHighValue, strongestSuit, "Liêng");
         }
 
-        // Đôi: ưu tiên giá trị đôi; nếu đôi bằng nhau, so lá lẻ rồi mới so chất.
-        if (c1.rankValue == c2.rankValue || c2.rankValue == c3.rankValue) {
-            int pairValue;
-            int kickerValue;
-            if (c1.rankValue == c2.rankValue) {
-                pairValue = c1.rankValue;
-                kickerValue = c3.rankValue;
-            } else {
-                pairValue = c2.rankValue;
-                kickerValue = c1.rankValue;
-            }
-            // Mã hóa lá lẻ + chất mạnh nhất để so tiếp khi đôi bằng nhau.
-            return new HandScore(2, pairValue, kickerValue * 10 + strongestSuit, "Đôi " + (pairValue == 14 ? "A" : c1.rankValue == c2.rankValue ? c1.rank : c2.rank));
+        // Ba Tây/Ảnh: cả ba lá đều là J, Q hoặc K, nhưng không tạo thành Liêng.
+        boolean threeFaceCards = sorted.stream().allMatch(c -> c.rankValue >= 11 && c.rankValue <= 13);
+        if (threeFaceCards) {
+            int highestFace = sorted.stream().mapToInt(c -> c.rankValue).max().orElse(0);
+            return new HandScore(2, highestFace, strongestSuit, "3 Tây");
         }
 
         int totalPoints = 0;
@@ -1802,8 +1833,10 @@ public class CasinoBot extends TelegramLongPollingBot {
             totalPoints += p;
         }
         int score = totalPoints % 10;
-        // Bài điểm thường: so điểm trước; bằng điểm thì so chất mạnh nhất trong 3 lá.
-        return new HandScore(1, score, strongestSuit, score + " điểm");
+        boolean hasPair = c1.rankValue == c2.rankValue || c2.rankValue == c3.rankValue;
+        // Bài điểm thường: điểm là tiêu chí chính. Chỉ khi bằng điểm mới xét đôi,
+        // rồi mới xét chất mạnh nhất nếu hai tay có cùng trạng thái đôi.
+        return new HandScore(1, score, strongestSuit, score + " điểm", hasPair);
     }
 
     private void takeDealer(long chatId, User user, String queryId) {
