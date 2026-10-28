@@ -43,8 +43,8 @@ import java.util.concurrent.*;
 public class CasinoBot extends TelegramLongPollingBot {
 
     private static final String TOKEN =
-        System.getenv("8846203742:AAG-m956eWnrXxhfPW47gsr2sDGFIR0axuI");
-
+        System.getenv("TELEGRAM_BOT_TOKEN");
+    
     private static volatile boolean maintenanceMode = false;
     private static volatile boolean transferLocked = false;
 
@@ -319,15 +319,15 @@ public class CasinoBot extends TelegramLongPollingBot {
         Set<Long> actedInCurrentRound = ConcurrentHashMap.newKeySet();
     }
 
-    @Override
-    public String getBotUsername() {
-        return "Casino_Game_Bot";
-    }
+   @Override
+       public String getBotUsername() {
+       return "xucxac004_bot";
+   }
 
-    @Override
+  @Override
     public String getBotToken() {
-        return TOKEN == null ? "" : TOKEN;
-    }
+    return TOKEN;
+}
 
     @Override
     public void onUpdateReceived(Update update) {
