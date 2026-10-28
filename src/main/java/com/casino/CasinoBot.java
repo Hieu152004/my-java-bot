@@ -42,8 +42,7 @@ import java.util.concurrent.*;
 
 public class CasinoBot extends TelegramLongPollingBot {
 
-    private static final String TOKEN =
-        System.getenv("TELEGRAM_BOT_TOKEN");
+    private static final String TOKEN = "8846203742:AAG-m956eWnrXxhfPW47gsr2sDGFIR0axuI";
     
     private static volatile boolean maintenanceMode = false;
     private static volatile boolean transferLocked = false;
