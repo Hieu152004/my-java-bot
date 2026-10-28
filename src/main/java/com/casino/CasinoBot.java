@@ -43,7 +43,7 @@ import java.util.concurrent.*;
 public class CasinoBot extends TelegramLongPollingBot {
 
     private static final String TOKEN = "8846203742:AAG-m956eWnrXxhfPW47gsr2sDGFIR0axuI";
-    
+
     private static volatile boolean maintenanceMode = false;
     private static volatile boolean transferLocked = false;
 
@@ -318,15 +318,15 @@ public class CasinoBot extends TelegramLongPollingBot {
         Set<Long> actedInCurrentRound = ConcurrentHashMap.newKeySet();
     }
 
-   @Override
-       public String getBotUsername() {
-       return "xucxac004_bot";
-   }
+    @Override
+    public String getBotUsername() {
+        return "Casino_Game_Bot";
+    }
 
-  @Override
+    @Override
     public String getBotToken() {
-    return TOKEN;
-}
+        return TOKEN == null ? "" : TOKEN;
+    }
 
     @Override
     public void onUpdateReceived(Update update) {
@@ -786,7 +786,7 @@ public class CasinoBot extends TelegramLongPollingBot {
             else if (game.currentPlayerId != user.getId()) answerAlert(query.getId(), "Chưa tới lượt bạn.");
             else {
                 showTienLenHand(chatId, user, 0);
-                answerAlert(query.getId(), "Đang gửi bài riêng cho bạn. Nếu chưa mở chat riêng với bot, hãy nhấn /start rồi thử lại.");
+                answerAlert(query.getId(), "Đang hiển thị bài trong nhóm.");
             }
         } else if (data.startsWith("tl_filter:")) {
             int count = Integer.parseInt(data.substring("tl_filter:".length()));
@@ -2601,8 +2601,8 @@ public class CasinoBot extends TelegramLongPollingBot {
 
     private void showTienLenHand(long chatId, User user, int count) {
         TienLenGame game = tienLenGames.get(chatId);
-        if (game == null || !game.started || game.settled) { sendMessage(user.getId(), "Ván Tiến Lên đã kết thúc."); return; }
-        if (game.currentPlayerId != user.getId()) { sendMessage(user.getId(), "⏳ Chưa tới lượt bạn."); return; }
+        if (game == null || !game.started || game.settled) { sendMessage(chatId, "Ván Tiến Lên đã kết thúc."); return; }
+        if (game.currentPlayerId != user.getId()) { sendMessage(chatId, "⏳ Chưa tới lượt bạn."); return; }
         List<Card> hand = game.hands.get(user.getId());
         if (hand == null) return;
         game.filterCount.put(user.getId(), count);
@@ -2626,22 +2626,23 @@ public class CasinoBot extends TelegramLongPollingBot {
                     createBtn("⏭️ BỎ QUA LƯỢT", "tldm:" + chatId + ":pass")));
         }
         byte[] image = renderTienLenCards(hand, Collections.emptySet());
-        SendPhoto photo = new SendPhoto(); photo.setChatId(String.valueOf(user.getId()));
+        // Theo yêu cầu: hiển thị bài trực tiếp trong nhóm, không gửi riêng.
+        // Lưu ý: mọi thành viên trong nhóm sẽ nhìn thấy bài trên tay của lượt hiện tại.
+        SendPhoto photo = new SendPhoto(); photo.setChatId(String.valueOf(chatId));
         photo.setPhoto(new InputFile(new ByteArrayInputStream(image), "tienlen-hand.png"));
         String caption = "🃏 <b>BÀI CỦA " + escapeHtml(displayName(user)) + "</b>\n"
                 + "Bài trên tay: " + hand.size() + " lá.\n"
                 + (count == 0 ? "Bấm số lá muốn đánh hoặc gửi số 1–13 trong chat." : "Các bộ hợp lệ có " + count + " lá. Bấm một bộ để đánh.");
         photo.setCaption(caption); photo.setParseMode("HTML"); photo.setReplyMarkup(new InlineKeyboardMarkup(rows));
         Integer oldId = game.handPhotoMessageIds.remove(user.getId());
-        if (oldId != null) deleteMessage(user.getId(), oldId);
+        if (oldId != null) deleteMessage(chatId, oldId);
         telegramExecutor.execute(() -> {
             try {
                 Message sent = execute(photo);
                 game.handPhotoMessageIds.put(user.getId(), sent.getMessageId());
             } catch (Exception e) {
-                System.err.println("[TIENLEN] Không gửi được bài riêng user=" + user.getId() + ": " + e.getMessage());
-                sendMessage(chatId, "🔒 " + getMention(user.getId(), displayName(user))
-                        + " hãy mở chat riêng với bot và nhấn /start, rồi bấm XEM BÀI lại. Bot không gửi bài riêng lên nhóm để tránh lộ bài.");
+                System.err.println("[TIENLEN] Không gửi được bài trong nhóm chat=" + chatId + ", user=" + user.getId() + ": " + e.getMessage());
+                sendMessage(chatId, "⚠️ Không gửi được hình bài vào nhóm. Kiểm tra quyền gửi ảnh của bot rồi bấm XEM BÀI lại.");
             }
         });
     }
@@ -3013,7 +3014,7 @@ public class CasinoBot extends TelegramLongPollingBot {
 
     private void deleteTienLenHandPhoto(long chatId, TienLenGame game, long userId) {
         Integer id = game.handPhotoMessageIds.remove(userId);
-        if (id != null) deleteMessage(userId, id); // Hand photos are sent privately, never to the group.
+        if (id != null) deleteMessage(chatId, id); // Bài trên tay được hiển thị trong nhóm và xóa sau khi đánh.
     }
 
     private void finishTienLenGame(long chatId, TienLenGame game) {
