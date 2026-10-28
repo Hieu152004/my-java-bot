@@ -296,13 +296,17 @@ public final class Database {
     }
 
     public static void setVipStatus(long userId, boolean status) {
-        try (Connection conn = openConnection(); PreparedStatement pstmt = conn.prepareStatement(
-                "UPDATE users SET is_vip = ? WHERE user_id = ?")) {
-            pstmt.setInt(1, status ? 1 : 0);
-            pstmt.setLong(2, userId);
-            if (pstmt.executeUpdate() != 1) System.err.println("[VIP] Không tìm thấy userId=" + userId + " để cập nhật VIP");
+        // Ensure /setvip works even if the target user has not yet been inserted into users.
+        // On conflict, only change is_vip; preserve their existing name and balance.
+        String sql = "INSERT INTO users (user_id, is_vip) VALUES (?, ?) " +
+                "ON CONFLICT (user_id) DO UPDATE SET is_vip = EXCLUDED.is_vip";
+        try (Connection conn = openConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setLong(1, userId);
+            pstmt.setInt(2, status ? 1 : 0);
+            int updated = pstmt.executeUpdate();
+            if (updated != 1) System.err.println("[VIP] Không cập nhật được trạng thái VIP userId=" + userId);
         } catch (SQLException e) {
-            System.err.println("[VIP] Không cập nhật được trạng thái VIP: " + e.getMessage());
+            System.err.println("[VIP] Không cập nhật được trạng thái VIP userId=" + userId + ": " + e.getMessage());
         }
     }
 
